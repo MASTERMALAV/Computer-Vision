@@ -72,7 +72,7 @@ face:
 
 hands:
   enabled: true
-  max_hands: 2
+  max_hands: 1   # one hand is all the virtual mouse needs; each extra hand costs a full model pass
   min_detection_confidence: 0.5
   min_tracking_confidence: 0.5
 

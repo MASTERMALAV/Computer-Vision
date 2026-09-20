@@ -1,121 +1,135 @@
 # ARGUS
 
-**A**daptive **R**ecognition & **G**esture **U**nderstanding **S**ystem — a real-time,
-CPU-first multimodal perception stack.
+**A**daptive **R**ecognition & **G**esture **U**nderstanding **S**ystem — a hands-free
+cursor driven by a webcam. CPU-only, fully local, no cloud inference.
 
-ARGUS answers three questions about the person in front of the camera, many times a second:
-
-| Question | Signal | Status |
-|---|---|---|
-| **Who is this?** | Face detection → alignment → embedding → gallery match | Phase 2 |
-| **What are they doing?** | 21-point hand landmarks → static + dynamic gesture recognition | Phase 3 |
-| **What did they say?** | VAD → streaming ASR → (optional) speaker verification | Phase 4 |
-
-The perception core is deliberately separate from anything that acts on the machine.
-ARGUS decides *what happened*; acting on it is opt-in, gated behind operator identity,
-and confirmable — see [Safety model](#safety-model).
+Point with an extended index finger to move the cursor. Pinch thumb-to-index to click,
+thumb-to-middle to right-click, hold the pinch to drag. Relax your hand and the cursor
+parks — then move your hand back to a comfortable spot and point again, exactly like
+lifting a mouse off a pad.
 
 ---
 
-## Why it is built this way
+## The interaction model, and why it is not what you would first guess
 
-The target machine is an **Intel i5-1035G1 (4 cores / 8 threads, 1.0 GHz base), 8 GB RAM**,
-with a 2 GB discrete GPU on an old driver (CUDA 11.4) that modern ONNX Runtime and PyTorch
-CUDA builds no longer support. That is not a footnote — it is the central design constraint:
+**The clutch is a pose, not a pinch.** A common design is "pinch to engage the cursor,
+release to disengage" — but that collides head-on with "pinch to click": one signal
+cannot mean two things. Here, *index extended* means the cursor is live. Relaxing your
+hand parks it. That frees pinch to mean exactly one thing, and holding a finger out is
+far less tiring than holding a pinch.
 
-- **Every model is chosen to hit real-time on CPU.** No model is used because it tops a
-  leaderboard; it is used because it tops a leaderboard *per millisecond on four cores*.
-- **Work is done as rarely as it can be.** Detection runs every *N*th frame and tracking
-  fills the gaps. Face embeddings are computed only every few frames per track, since an
-  identity does not change between frames.
-- **Latency is measured, not assumed.** Every stage is timed, and the age of a frame at
-  draw time is on screen, because that is the lag you actually feel when you wave a hand.
+**Motion is relative, not absolute.** The cursor moves by the *displacement* of your
+hand, like a mouse — not to a point your finger aims at. Ray-casting from a fingertip
+needs real 3D; a single webcam's depth estimate is weak and the camera is not at your
+eye. Relative motion is also what makes clutching meaningful: you can re-centre your hand
+whenever you like, so the reachable screen area is unbounded and **your hand can stay low
+near the desk**. No gorilla arm.
 
-If you run this on a stronger machine, `--profile accurate` moves every quality knob at once.
+**The palm drives the cursor, not the fingertip.** When you pinch, your fingertip moves —
+so a fingertip-driven cursor slides off the target at the exact moment you commit. That
+click-induced drift is the largest source of error in mid-air pointing. The palm centroid
+barely moves when fingers flex, so the problem is removed at the source rather than
+filtered away afterwards. A cursor freeze on pinch *onset* catches the remainder.
+
+**Every distance is measured in hand-widths.** Thresholds are divided by your own
+wrist-to-knuckle span, so a pinch reads the same whether your hand is 30 cm or 60 cm from
+the camera. One set of thresholds, any distance.
+
+**Gain rises with speed.** A single fixed gain cannot both hit a 16 px close button and
+cross a 4480 px dual-monitor desktop. Slow movements get precision; fast ones cover
+ground, blended with a smoothstep so you never feel the change.
 
 ---
 
 ## Install
 
-Requires Python 3.10+ (developed on 3.12).
-
 ```bash
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements-core.txt
-.venv\Scripts\python.exe -m pip install pygrabber        # Windows: camera names
+.venv\Scripts\python.exe -m argus models pull
 ```
 
----
-
-## Quick start
-
-**1. See what cameras you have, and which one ARGUS will use:**
+## Use it
 
 ```bash
-python -m argus cameras
+python -m argus mouse
 ```
 
-```
-  Cameras available (3 found)
-
-     [0] Integrated Camera
-  -> [1] Brio 100
-     [2] Integrated IR Camera   (infrared - not usable for face recognition)
-```
-
-The `->` marks the current selection. Auto-selection prefers an external colour camera
-over the built-in one, and never picks a Windows Hello infrared camera.
-
-**2. Pick a camera explicitly** — by name substring, by index, or leave it on `auto`:
-
-```bash
-python -m argus preview --camera brio
-python -m argus preview --camera 0
-```
-
-To make it permanent, set `capture.camera.device` in `configs/default.yaml`.
-
-**3. Verify capture is actually real-time:**
-
-```bash
-python -m argus bench capture --seconds 15
-```
-
-This is an acceptance gate, not a demo: it fails if sustained delivery falls more than
-20 % below the requested frame rate.
-
-### Preview controls
+It starts **disarmed**: the full pipeline runs and the HUD shows exactly what it *would*
+do, but nothing touches your cursor until you press **F9**.
 
 | Key | Action |
 |---|---|
-| `q` / `Esc` | quit |
-| `n` | switch to the next camera, live |
-| `s` | save a snapshot to `captures/` |
-| `m` | toggle mirroring |
-| `h` | hide the help panel |
+| **F9** | arm / disarm cursor control |
+| **Esc** (hold) | emergency disarm — works from any window |
+| **F10** | re-centre the cursor on the primary display |
+| `q` | quit |
+
+Fit the gesture thresholds to your own hand — worth doing once, since thumb proportions
+vary enough to matter:
+
+```bash
+python -m argus calibrate --write
+python -m argus mouse -c configs/calibrated.yaml
+```
+
+Other commands: `cameras`, `preview`, `hands`, `screens`, `models`, `config`,
+`bench capture`, `bench hands`.
 
 ---
 
-## Configuration
+## Safety
 
-One file, `configs/default.yaml`, mirrors the typed schema in `argus/config.py`.
-Three layers, each overriding the last:
+Driving the real cursor from a perception pipeline is inherently risky, so the safeguards
+are structural rather than advisory:
 
-1. dataclass defaults — always complete and valid
-2. the YAML file
-3. `--set key=value` on the command line
+- **Disarmed by default.** Nothing reaches the OS until you explicitly arm it.
+- **The panic key is read from the hardware**, via `GetAsyncKeyState`, not from the
+  preview window. This matters: the moment the system clicks something, the preview loses
+  focus and a window-level key handler would stop working — precisely when you most need
+  to stop it.
+- **Buttons are always released** on every exit path, so quitting mid-drag can never leave
+  the desktop with a stuck mouse button. The same applies if identity is lost mid-drag.
+- **Input-side plausibility limits.** A hand cannot move a third of its own width in 33 ms;
+  anything that claims otherwise is a landmark glitch and is rejected *before* gain
+  amplifies it.
+- **Identity gating** (optional, `security.require_identity`) runs on an authenticated
+  *session*, not a per-frame face match — recognition at 30 fps is unaffordable on this
+  CPU, and gating motion frame-by-frame would freeze the cursor every time you glanced at
+  your keyboard. Destructive actions additionally require a *fresh* match.
 
-```bash
-python -m argus preview --set capture.camera.width=1920 --set capture.camera.fps=60
-python -m argus config           # print the fully resolved result
-```
+---
 
-**Unknown keys are a hard error.** A typo like `widht: 1920` fails at startup with the
-list of valid keys, instead of silently running with defaults.
+## Measured on the target machine
 
-Profiles (`--profile fast|balanced|accurate`) move several coupled knobs at once — detector
-size, model choice, detection stride, hand model complexity. Anything you set explicitly
-still wins over the profile.
+Intel i5-1035G1 (4C/8T, 1.0 GHz), 8 GB RAM, **CPU-only** — the 2 GB GPU runs a driver
+(CUDA 11.4) too old for current ONNX Runtime and Torch CUDA builds. Logitech Brio 100 at
+1280×720.
+
+| Stage | Mean | Budget |
+|---|---|---|
+| capture latency | 1.95 ms | — |
+| preprocess | 0.30 ms | — |
+| hand landmarks | **12.06 ms** | 33.3 |
+| gestures | 0.16 ms | — |
+| pointer | 0.03 ms | — |
+| dispatch | 0.00 ms | — |
+| HUD render | 4.85 ms | — |
+| **total** | **17.4 ms** | 33.3 → **48 % headroom** |
+
+Sustained **28.2 fps** end to end, 0 % dropped frames.
+
+Three findings drove that, all measured rather than assumed:
+
+1. **Backend choice was worth 6× throughput.** OpenCV's DirectShow backend negotiates
+   uncompressed YUY2 at 720p, which this camera caps at 5 fps;
+   `set(CAP_PROP_FOURCC, MJPG)` returns `True` and changes nothing. MSMF refuses the
+   property outright yet delivers 30 fps. No static rule predicts this, so ARGUS measures
+   each backend and keeps whichever actually delivers, caching the verdict.
+2. **`OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0` cut camera open time from 24.6 s to
+   0.6 s** with identical throughput.
+3. **Tracking one hand instead of two halved landmark cost** (28.4 → 12.1 ms). Each extra
+   hand is a full model pass.
 
 ---
 
@@ -124,83 +138,78 @@ still wins over the profile.
 ```
 argus/
   config.py          typed, layered, strict configuration
-  metrics.py         allocation-free rolling timers and FPS
-  logsetup.py        one logging setup for every entry point
-  capture/
-    devices.py       camera discovery, naming, scoring, selection
-    camera.py        threaded reader with latest-frame semantics
-    preview.py       live preview + headless capture benchmark
-  face/              Phase 2 - SCRFD detection, ArcFace embeddings, gallery
-  hands/             Phase 3 - MediaPipe landmarks, gesture recognition
-  audio/             Phase 4 - VAD, ASR, speaker verification
-  fusion/            Phase 5 - event bus, perception state, action dispatch
-  ui/overlay.py      shared drawing primitives
+  metrics.py         allocation-free rolling timers
+  capture/           camera discovery, backend negotiation, threaded reader
+  hands/             MediaPipe Tasks landmarks, hand geometry, calibration
+  gestures/fsm.py    Schmitt triggers, debouncing, click/drag discrimination
+  control/
+    filters.py       One Euro filter, velocity gain curve
+    screens.py       virtual desktop, per-monitor DPI, monitor enumeration
+    injector.py      SendInput via ctypes
+    pointer.py       clutch, relative mapping, gain, click freeze
+    dispatcher.py    the only code allowed to affect the machine
+    hotkeys.py       global key state
+  app.py             the integrated runtime
 ```
 
-### Capture: why a thread
+### Two Windows details that silently break naive implementations
 
-Reading frames on the main loop couples inference speed to capture speed. If a frame takes
-40 ms to process, the next `cap.read()` returns an image the driver queued 40 ms ago, and
-the lag compounds until the preview is visibly behind your hand.
+Both are real on the development machine, not hypothetical:
 
-The reader thread keeps **only the newest frame**. Frames produced while a consumer was busy
-are dropped on purpose and *counted*, so the drop rate is visible on the HUD rather than
-silently degrading interactivity.
+**The virtual desktop origin is not (0, 0).** The primary display's top-left is the
+origin, so a monitor placed to its *left* occupies **negative X**. Here the external
+2560×1440 sits at `x = -2560`. Code assuming `0 <= x < screen_width` cannot reach it at
+all. Absolute coordinates are computed over the whole virtual desktop, with `width - 1` in
+the denominator — using `width` makes the rightmost column unreachable, so the maximise
+button can never be clicked.
 
----
-
-## Phases
-
-Each phase ends with a verification gate that has to pass before the next one starts.
-
-- [x] **Phase 0 — Foundation.** Config, logging, metrics, project layout, tests.
-- [x] **Phase 1 — Capture.** Camera discovery and selection by name, threaded latest-frame
-      reader, negotiated-format reporting, live preview, capture benchmark.
-- [ ] **Phase 2 — Face.** SCRFD detection, 5-point alignment, ArcFace embeddings, enrolment,
-      gallery matching with hysteresis, identity tracking.
-- [ ] **Phase 3 — Hands.** MediaPipe landmarks, pose-invariant features, static gesture
-      classification, dynamic gestures (pinch, swipe), temporal smoothing.
-- [ ] **Phase 4 — Voice.** Silero VAD, streaming ASR, optional speaker verification.
-- [ ] **Phase 5 — Fusion.** Event bus, multimodal state, gesture → action dispatch.
-
----
-
-## Safety model
-
-Gestures that trigger real system actions are handled with deliberate friction, because a
-false positive on "shut down" is expensive and a false positive on "scroll" is not:
-
-- **Identity gating** — an action only fires for a recognised, enrolled operator.
-- **Dry-run by default** — the dispatcher logs what it *would* do until explicitly armed.
-- **Per-action confirmation** — destructive actions require a second, distinct signal.
-- **Debounce and cooldown** — one gesture cannot fire twice in quick succession.
-
----
-
-## Privacy
-
-Face embeddings are biometric data. `data/` and `models/` are git-ignored: **enrolled
-identities never leave this machine and are never committed.** Enrolment is explicit and
-per-person; there is no background collection.
+**DPI awareness must be declared before any metric is read.** The laptop panel here runs
+at 150 % scaling; without `PER_MONITOR_AWARE_V2` every coordinate is wrong by 1.5× and the
+error grows with distance from the origin.
 
 ---
 
 ## Testing
 
 ```bash
-.venv\Scripts\python.exe -m pytest                     # everything that needs no hardware
-.venv\Scripts\python.exe -m pytest -m "not camera"     # skip hardware-dependent tests
+.venv\Scripts\python.exe -m pytest        # 132 tests, no hardware required
 ```
+
+Gestures and cursor maths are tested against **synthetic hands** with exactly specified
+geometry, so a test can assert something precise — "the same pinch at four times the
+apparent size must produce an identical event sequence" — with no ambiguity. Coverage
+includes hysteresis (a signal oscillating inside the deadband must produce zero flips),
+click-versus-drag discrimination, depth invariance, negative-coordinate mapping,
+click-drift, stuck-button prevention, and the full landmarks→gestures→pointer→dispatch
+chain.
 
 ---
 
-## Model credits
+## Status
 
-- **SCRFD** / **ArcFace** — [InsightFace](https://github.com/deepinsight/insightface)
-  (Guo et al., *Sample and Computation Redistribution for Efficient Face Detection*;
-  Deng et al., *ArcFace: Additive Angular Margin Loss*)
-- **MediaPipe Hands** — Zhang et al., *MediaPipe Hands: On-device Real-time Hand Tracking*
-- **Silero VAD**, **faster-whisper** (CTranslate2) — Phase 4
+- [x] **Phase 0–1** Foundation, camera discovery and selection, threaded capture
+- [x] **Phase 2** Hand landmark engine
+- [x] **Phase 3** Gesture state machine
+- [x] **Phase 4** Cursor core: filtering, gain, clutch, injection
+- [x] **Phase 5** Click, right-click, double-click, drag
+- [ ] **Phase 6** Face recognition and identity gating *(interfaces in place, gate
+      currently permissive)*
+- [ ] **Phase 7** Scroll, two-hand zoom, voice
+
+Face gating is wired end-to-end (`ActionDispatcher` consumes an `IdentityStatus`, and
+losing identity mid-drag releases the button) but the recogniser itself is not built yet,
+so `security.require_identity` defaults to `false`. SCRFD and ArcFace weights are already
+fetched and checksum-pinned.
+
+## Privacy
+
+Face embeddings are biometric data. `data/` and `models/` are git-ignored: enrolled
+identities never leave this machine and are never committed.
+
+## Credits
+
+MediaPipe Hands (Zhang et al.) · SCRFD and ArcFace, InsightFace (Guo et al., Deng et al.) ·
+One Euro filter (Casiez, Roussel & Vogel, CHI 2012)
 
 ## License
 

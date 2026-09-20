@@ -4,6 +4,11 @@ Every phase of the system is reachable from one entry point::
 
     python -m argus cameras            # discover and choose a camera
     python -m argus preview            # live capture preview + FPS
+    python -m argus models pull        # fetch model weights
+    python -m argus hands              # live hand landmark preview
+    python -m argus mouse              # the virtual mouse
+    python -m argus calibrate          # fit gesture thresholds to your hand
+    python -m argus screens            # display layout + DPI
     python -m argus bench capture      # headless throughput benchmark
     python -m argus config             # show the effective configuration
 """
@@ -155,6 +160,115 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# hands
+# --------------------------------------------------------------------------- #
+def cmd_hands(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .hands.preview import run_hands_preview
+
+    return run_hands_preview(cfg, seconds=args.seconds, renegotiate=args.renegotiate)
+
+
+# --------------------------------------------------------------------------- #
+# mouse
+# --------------------------------------------------------------------------- #
+def cmd_mouse(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .app import run_mouse
+
+    return run_mouse(
+        cfg,
+        seconds=args.seconds,
+        start_armed=args.armed,
+        renegotiate=args.renegotiate,
+        out=args.out,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# calibrate
+# --------------------------------------------------------------------------- #
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .gestures.calibrate import run_calibration
+
+    return run_calibration(cfg, write=args.write)
+
+
+# --------------------------------------------------------------------------- #
+# screens
+# --------------------------------------------------------------------------- #
+def cmd_screens(args: argparse.Namespace) -> int:
+    _load_config(args)
+    from .control.screens import ensure_dpi_aware, get_cursor_position, get_virtual_desktop
+
+    awareness = ensure_dpi_aware()
+    desktop = get_virtual_desktop()
+    if args.json:
+        print(json.dumps({
+            "dpi_awareness": awareness,
+            "virtual_desktop": {
+                "left": desktop.left, "top": desktop.top,
+                "width": desktop.width, "height": desktop.height,
+            },
+            "monitors": [
+                {"index": m.index, "left": m.left, "top": m.top,
+                 "width": m.width, "height": m.height,
+                 "primary": m.is_primary, "dpi": m.dpi}
+                for m in desktop.monitors
+            ],
+            "cursor": list(get_cursor_position()),
+        }, indent=2))
+        return 0
+    print()
+    print(f"  DPI awareness: {awareness}")
+    for line in desktop.describe().splitlines():
+        print("  " + line)
+    print(f"  cursor currently at {get_cursor_position()}")
+    print()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# models
+# --------------------------------------------------------------------------- #
+def cmd_models(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .models import registry
+
+    if args.action == "pull":
+        names = args.names or registry.models_for_profile(cfg.runtime.profile)
+        for name in names:
+            path = registry.ensure(name)
+            print(f"  {name:<16} -> {path}")
+        return 0
+
+    if args.action == "verify":
+        failed = False
+        for name, ok, note in registry.verify_installed():
+            print(f"  [{'OK  ' if ok else 'FAIL'}]  {name:<16} {note}")
+            failed |= not ok
+        return 1 if failed else 0
+
+    rows = registry.status()
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    print()
+    print(f"  Models ({sum(1 for r in rows if r['installed'])}/{len(rows)} installed)")
+    print()
+    for row in rows:
+        mark = "installed" if row["installed"] else "not fetched"
+        size = f"{row['size_mb']} MB" if row["size_mb"] else ""
+        print(f"  [{mark:>11}] {row['name']:<16} {size:>9}  {row['description']}")
+        print(f"                {' ' * 16} {row['credit']}")
+    print()
+    print("  Fetch what the current profile needs:  python -m argus models pull")
+    print()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # bench
 # --------------------------------------------------------------------------- #
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -164,6 +278,11 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
         return bench_capture(cfg, seconds=args.seconds, out=args.out,
                              renegotiate=args.renegotiate)
+    if args.target == "hands":
+        from .hands.preview import bench_hands
+
+        return bench_hands(cfg, seconds=args.seconds, out=args.out,
+                           renegotiate=args.renegotiate)
     print(f"Unknown benchmark target: {args.target}", file=sys.stderr)
     return 2
 
@@ -213,10 +332,50 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_bench = sub.add_parser("bench", help="run a headless benchmark")
     _add_common(p_bench)
-    p_bench.add_argument("target", choices=["capture"], help="what to benchmark")
+    p_bench.add_argument("target", choices=["capture", "hands"], help="what to benchmark")
     p_bench.add_argument("--seconds", type=float, default=15.0, help="benchmark duration")
     p_bench.add_argument("--out", default=None, help="write JSON results to this path")
     p_bench.set_defaults(func=cmd_bench)
+
+    p_hands = sub.add_parser("hands", help="live hand landmark preview")
+    _add_common(p_hands)
+    p_hands.add_argument("--seconds", type=float, default=0.0, help="auto-exit after N seconds")
+    p_hands.set_defaults(func=cmd_hands)
+
+    p_mouse = sub.add_parser("mouse", help="run the virtual mouse (disarmed until you press F9)")
+    _add_common(p_mouse)
+    p_mouse.add_argument("--seconds", type=float, default=0.0, help="auto-exit after N seconds")
+    p_mouse.add_argument(
+        "--armed", action="store_true",
+        help="start with cursor control live (default: start disarmed)",
+    )
+    p_mouse.add_argument("--out", default=None, help="write a session report to this path")
+    p_mouse.set_defaults(func=cmd_mouse)
+
+    p_cal = sub.add_parser("calibrate", help="fit gesture thresholds to your hand")
+    _add_common(p_cal)
+    p_cal.add_argument(
+        "--write",
+        nargs="?",
+        const="configs/calibrated.yaml",
+        default=None,
+        help="write the fitted thresholds to a config file (default: configs/calibrated.yaml)",
+    )
+    p_cal.set_defaults(func=cmd_calibrate)
+
+    p_screens = sub.add_parser("screens", help="show display layout and DPI awareness")
+    _add_common(p_screens)
+    p_screens.add_argument("--json", action="store_true", help="machine-readable output")
+    p_screens.set_defaults(func=cmd_screens)
+
+    p_models = sub.add_parser("models", help="download and verify model weights")
+    _add_common(p_models)
+    p_models.add_argument(
+        "action", nargs="?", default="status", choices=["status", "pull", "verify"]
+    )
+    p_models.add_argument("names", nargs="*", help="specific models (default: what the profile needs)")
+    p_models.add_argument("--json", action="store_true", help="machine-readable output")
+    p_models.set_defaults(func=cmd_models)
 
     p_cfg = sub.add_parser("config", help="print the effective configuration")
     _add_common(p_cfg)

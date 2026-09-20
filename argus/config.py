@@ -120,7 +120,9 @@ class FaceConfig:
 @dataclass
 class HandsConfig:
     enabled: bool = True
-    max_hands: int = 2
+    # One hand by default: the virtual mouse only needs one, and each extra hand
+    # costs a full landmark-model pass. Raise to 2 for two-handed gestures.
+    max_hands: int = 1
     min_detection_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
     model_complexity: int = 1  # 0 = lite/faster, 1 = full/accurate
@@ -144,6 +146,93 @@ class AudioConfig:
     asr_model: str = "base.en"
     asr_compute_type: str = "int8"
     speaker_verification: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Gestures
+# --------------------------------------------------------------------------- #
+@dataclass
+class GestureConfig:
+    """Gesture geometry, in hand-scale units (see argus/hands/landmarks.py).
+
+    Every distance is divided by the user's own wrist-to-knuckle span, so these
+    thresholds hold at any distance from the camera. Measure values fitted to
+    your own hand with: python -m argus calibrate
+    """
+
+    pinch_close: float = 0.34
+    pinch_open: float = 0.50
+    pinch_approach: float = 0.62
+    finger_extended: float = 1.05
+    finger_curled: float = 0.85
+    debounce_frames: int = 2
+    clutch_debounce_frames: int = 3
+    drag_dwell_s: float = 0.35
+    click_cooldown_s: float = 0.25
+    double_click_s: float = 0.40
+    motion_gate_speed: float = 2.6
+
+
+# --------------------------------------------------------------------------- #
+# Cursor control
+# --------------------------------------------------------------------------- #
+@dataclass
+class GainCurveConfig:
+    slow_speed: float = 0.35
+    fast_speed: float = 3.0
+    min_gain: float = 0.55
+    max_gain: float = 3.4
+    pixels_per_unit: float = 900.0
+
+
+@dataclass
+class SmoothingConfig:
+    min_cutoff: float = 1.0
+    beta: float = 0.02
+    d_cutoff: float = 1.0
+
+
+@dataclass
+class ControlConfig:
+    """Cursor control.
+
+    ``armed`` is the safety interlock. While false the whole pipeline runs and
+    the HUD shows exactly what it would do, but no input reaches the operating
+    system. Nothing arms itself automatically.
+    """
+
+    enabled: bool = True
+    armed: bool = False
+    source: str = "palm"  # palm | index_mcp | index_tip
+    dead_zone: float = 0.0016
+    freeze_timeout_s: float = 0.45
+    max_delta_units: float = 0.30
+    max_jump_px: float = 1400.0
+    gain: GainCurveConfig = field(default_factory=GainCurveConfig)
+    smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
+    # Which hand may drive the cursor: Left | Right | any
+    hand: str = "any"
+
+
+# --------------------------------------------------------------------------- #
+# Security
+# --------------------------------------------------------------------------- #
+@dataclass
+class SecurityConfig:
+    """Identity gating.
+
+    Cursor motion rides an authenticated *session* rather than a per-frame face
+    match: recognition at 30 fps is unaffordable on this CPU, and gating motion
+    frame-by-frame would freeze the cursor every time the operator glanced down
+    at the keyboard. Destructive actions still demand a fresh match.
+    """
+
+    require_identity: bool = False
+    operator: str = ""
+    session_timeout_s: float = 120.0
+    reverify_interval_s: float = 15.0
+    fresh_match_within_s: float = 5.0
+    confirm_countdown_s: float = 5.0
 
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +265,9 @@ class ArgusConfig:
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     face: FaceConfig = field(default_factory=FaceConfig)
     hands: HandsConfig = field(default_factory=HandsConfig)
+    gestures: GestureConfig = field(default_factory=GestureConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
@@ -250,6 +342,28 @@ class ArgusConfig:
             raise ConfigError("hands.model_complexity must be 0 or 1")
         if self.face.detect_every_n_frames < 1:
             raise ConfigError("face.detect_every_n_frames must be >= 1")
+        g = self.gestures
+        if not g.pinch_close < g.pinch_open:
+            raise ConfigError(
+                "gestures.pinch_close must be smaller than gestures.pinch_open; "
+                "without that gap the pinch has no hysteresis and will chatter"
+            )
+        if g.pinch_approach < g.pinch_open:
+            raise ConfigError(
+                "gestures.pinch_approach must be >= gestures.pinch_open so the "
+                "cursor freezes before the click registers"
+            )
+        if not g.finger_curled < g.finger_extended:
+            raise ConfigError("gestures.finger_curled must be < gestures.finger_extended")
+        if self.control.source not in {"palm", "index_mcp", "index_tip"}:
+            raise ConfigError("control.source must be palm|index_mcp|index_tip")
+        if self.control.hand not in {"Left", "Right", "any"}:
+            raise ConfigError("control.hand must be Left|Right|any")
+        gc = self.control.gain
+        if gc.slow_speed >= gc.fast_speed:
+            raise ConfigError("control.gain.slow_speed must be < fast_speed")
+        if gc.min_gain > gc.max_gain:
+            raise ConfigError("control.gain.min_gain must be <= max_gain")
 
     def apply_profile(self) -> "ArgusConfig":
         """Re-tune speed/accuracy knobs from ``runtime.profile``.
