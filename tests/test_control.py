@@ -12,7 +12,7 @@ from argus.control.pointer import PointerConfig, PointerEngine
 from argus.control.screens import Monitor, VirtualDesktop
 from argus.gestures.fsm import GestureEngine, GestureEvent, GestureType
 
-from conftest import make_hand
+from conftest import make_hand, pointing_hand, scrolling_hand
 
 DT = 1.0 / 30.0
 
@@ -418,3 +418,84 @@ def test_full_chain_click_moves_nothing_and_fires_once():
     drift = abs(after[0] - before[0])
     assert [r.action for r in executed].count("click") == 1, "exactly one click"
     assert drift < 40.0, f"click induced {drift:.0f}px of cursor drift"
+
+
+# --------------------------------------------------------------------------- #
+# Scroll
+# --------------------------------------------------------------------------- #
+def scroll_state():
+    from argus.gestures.fsm import GestureState
+
+    return GestureState(clutch_engaged=True, mode="scroll", hand_speed=0.4)
+
+
+def test_scroll_mode_emits_wheel_and_does_not_move_the_cursor():
+    inj = MouseInjector(dual_desktop(), armed=True)
+    p = PointerEngine(inj, PointerConfig())
+    p.sync_from_system()
+    before = p.state.position
+
+    notches = 0
+    for i in range(16):
+        hand = scrolling_hand(palm=(640.0, 360.0 - i * 9.0))
+        p.update(hand, scroll_state(), [], 100.0 + i * DT)
+        notches += p.state.scroll_notches
+    assert notches != 0, "vertical movement in scroll mode must emit wheel notches"
+    assert p.state.position == before, "scrolling must not move the pointer"
+    assert inj.stats.scrolls > 0
+
+
+def test_scroll_direction_follows_hand_direction():
+    inj = MouseInjector(dual_desktop(), armed=True)
+    up, down = PointerEngine(inj, PointerConfig()), PointerEngine(inj, PointerConfig())
+
+    def run(engine, step):
+        total = 0
+        for i in range(16):
+            engine.update(scrolling_hand(palm=(640.0, 360.0 + i * step)),
+                          scroll_state(), [], 100.0 + i * DT)
+            total += engine.state.scroll_notches
+        return total
+
+    assert run(up, -9.0) > 0
+    assert run(down, +9.0) < 0
+
+
+def test_a_still_hand_does_not_scroll():
+    inj = MouseInjector(dual_desktop(), armed=True)
+    p = PointerEngine(inj, PointerConfig())
+    total = 0
+    for i in range(30):
+        p.update(scrolling_hand(palm=(640.0, 360.0)), scroll_state(), [], 100.0 + i * DT)
+        total += p.state.scroll_notches
+    assert total == 0
+
+
+def test_scroll_is_depth_invariant():
+    """Same movement in hand-widths must scroll the same amount at any distance."""
+    inj = MouseInjector(dual_desktop(), armed=True)
+
+    def run(scale, step):
+        engine = PointerEngine(inj, PointerConfig())
+        total = 0
+        for i in range(20):
+            engine.update(scrolling_hand(palm=(640.0, 360.0 - i * step), scale=scale),
+                          scroll_state(), [], 100.0 + i * DT)
+            total += engine.state.scroll_notches
+        return total
+
+    assert run(200.0, 18.0) == run(50.0, 4.5)
+
+
+def test_leaving_scroll_mode_resets_the_accumulator():
+    inj = MouseInjector(dual_desktop(), armed=True)
+    p = PointerEngine(inj, PointerConfig())
+    from argus.gestures.fsm import GestureState
+
+    for i in range(6):
+        p.update(scrolling_hand(palm=(640.0, 360.0 - i * 4.0)), scroll_state(), [],
+                 100.0 + i * DT)
+    # Disengaging must not leave a partial notch that fires later.
+    p.update(None, GestureState(clutch_engaged=False), [], 101.0)
+    p.update(scrolling_hand(palm=(640.0, 360.0)), scroll_state(), [], 101.1)
+    assert p.state.scroll_notches == 0

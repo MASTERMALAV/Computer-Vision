@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from argus.config import ArgusConfig
-from argus.gestures.calibrate import derive_thresholds
+from argus.gestures.calibrate import derive_thresholds, implausible
 
 
 def stats(p05, p50, p95, n=45):
@@ -24,6 +24,14 @@ def test_well_separated_poses_produce_clean_thresholds():
     assert not warnings
     assert t["pinch_close"] < t["pinch_open"] < t["pinch_approach"]
     assert t["finger_curled"] < t["finger_extended"]
+
+
+def test_scroll_threshold_is_derived_from_the_same_measurement():
+    """A fixed scroll threshold can fall below a calibrated 'curled' value,
+    which would make a curled middle finger read as a scroll request."""
+    t, _ = derive_thresholds(SEPARATED)
+    assert t["scroll_middle_extended"] == t["finger_extended"]
+    assert t["scroll_middle_extended"] > t["finger_curled"]
 
 
 def test_derived_thresholds_sit_between_the_measured_poses():
@@ -79,3 +87,49 @@ def test_no_data_yields_nothing():
     t, warnings = derive_thresholds({})
     assert t == {}
     assert not warnings
+
+
+# --------------------------------------------------------------------------- #
+# Physical plausibility
+#
+# Regression test for a real calibration run that produced cleanly separated but
+# nonsensical thresholds, because the operator's fingertips never met during the
+# PINCH pose. Separation alone did not catch it.
+# --------------------------------------------------------------------------- #
+NEVER_ACTUALLY_PINCHED = {
+    "open": stats(1.40, 1.48, 1.56),
+    "pinch": stats(1.24, 1.29, 1.30),      # no real pinch: fingertips never met
+    "extended": stats(0.90, 0.90, 0.92),   # index not straightened
+    "curled": stats(0.24, 0.29, 0.29),
+}
+
+
+def test_implausible_pinch_is_detected():
+    problems = implausible(NEVER_ACTUALLY_PINCHED)
+    assert any("PINCH" in p for p in problems)
+
+
+def test_implausible_pointing_is_detected():
+    problems = implausible(NEVER_ACTUALLY_PINCHED)
+    assert any("POINTING" in p for p in problems)
+
+
+def test_plausible_measurements_raise_nothing():
+    assert implausible(SEPARATED) == []
+
+
+def test_derive_reports_implausible_input_even_when_it_separates():
+    """The bad run separated cleanly, so only a plausibility check catches it."""
+    thresholds, warnings = derive_thresholds(NEVER_ACTUALLY_PINCHED)
+    assert warnings, "implausible poses must be reported"
+    # It still returns values, but the caller refuses to save them.
+    assert thresholds["pinch_close"] > 1.0
+
+
+def test_problem_messages_say_what_to_do():
+    for message in implausible(NEVER_ACTUALLY_PINCHED):
+        assert "must" in message or "straighten" in message or "curl" in message
+
+
+def test_missing_poses_are_not_flagged():
+    assert implausible({}) == []

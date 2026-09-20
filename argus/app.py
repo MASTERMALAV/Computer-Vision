@@ -21,12 +21,14 @@ from pathlib import Path
 from .capture.camera import CameraStream
 from .capture.devices import resolve_device
 from .config import ROOT, ArgusConfig
+from .control.confirm import Confirmer
 from .control.dispatcher import ActionDispatcher
 from .control.filters import GainConfig, OneEuroConfig
 from .control.hotkeys import VK_F9, VK_F10, EdgeDetector, PanicSwitch
 from .control.injector import MouseInjector
-from .control.pointer import PointerConfig, PointerEngine
+from .control.pointer import PointerConfig, PointerEngine, ScrollConfig
 from .control.screens import get_virtual_desktop
+from .face.pipeline import FacePipeline
 from .gestures.fsm import GestureEngine, GestureThresholds, GestureType
 from .hands.engine import HandEngine
 from .logsetup import get_logger
@@ -52,6 +54,12 @@ def _pointer_config(cfg: ArgusConfig) -> PointerConfig:
             beta=c.smoothing.beta,
             d_cutoff=c.smoothing.d_cutoff,
         ),
+        scroll=ScrollConfig(
+            units_per_notch=c.scroll.units_per_notch,
+            dead_zone=c.scroll.dead_zone,
+            max_notches_per_frame=c.scroll.max_notches_per_frame,
+            invert=c.scroll.invert,
+        ),
         source=c.source,
         dead_zone=c.dead_zone,
         freeze_timeout_s=c.freeze_timeout_s,
@@ -74,6 +82,8 @@ def _gesture_thresholds(cfg: ArgusConfig) -> GestureThresholds:
         click_cooldown_s=g.click_cooldown_s,
         double_click_s=g.double_click_s,
         motion_gate_speed=g.motion_gate_speed,
+        scroll_middle_extended=g.scroll_middle_extended,
+        scroll_debounce_frames=g.scroll_debounce_frames,
     )
 
 
@@ -91,8 +101,9 @@ HELP = [
     "F9       arm / disarm cursor control",
     "Esc      HOLD to disarm (works anywhere)",
     "F10      re-centre cursor on primary",
-    "q        quit",
-    "h        hide this panel",
+    "point    one finger moves the cursor",
+    "scroll   two fingers scroll",
+    "q        quit    h  hide this panel",
 ]
 
 
@@ -129,6 +140,23 @@ def run_mouse(
     injector = MouseInjector(desktop, armed=False)
     pointer = PointerEngine(injector, _pointer_config(cfg))
     dispatcher = ActionDispatcher(injector, cfg.security)
+    confirmer = Confirmer(duration_s=cfg.security.confirm_countdown_s)
+
+    face: FacePipeline | None = None
+    if cfg.face.enabled:
+        try:
+            face = FacePipeline(cfg).start()
+        except Exception as exc:
+            # A missing model or an incompatible gallery must not take the
+            # mouse down with it - but if identity gating was required, running
+            # on without it would silently remove the safety control.
+            if cfg.security.require_identity:
+                cam.stop()
+                engine.close()
+                print(f"\n  Identity gating is required but the face stage failed:\n  {exc}\n")
+                return 2
+            log.warning("face stage disabled: %s", exc)
+            face = None
 
     if start_armed:
         injector.arm()
@@ -175,6 +203,7 @@ def run_mouse(
 
             # ---- global hotkeys, read straight from the keyboard ---------- #
             if panic.triggered(now):
+                confirmer.cancel("panic key", now)
                 if injector.armed:
                     log.warning("PANIC: disarming")
                     dispatcher.shutdown()
@@ -221,10 +250,28 @@ def run_mouse(
 
             hand = _select_hand(result, cfg.control.hand)
 
+            # ---- identity -------------------------------------------------- #
+            # Duty-cycled: this is a no-op on the vast majority of frames once
+            # an operator is authenticated. See argus/face/pipeline.py.
+            if face is not None:
+                with metrics.timer("stage.face"):
+                    face.update(frame.image, frame.index, now)
+                dispatcher.set_identity(face.status(now))
+                for session_event in face.drain_events():
+                    recent_events.append(str(session_event))
+
             with metrics.timer("stage.gestures"):
                 events = gestures.update(hand, now)
             with metrics.timer("stage.pointer"):
                 pstate = pointer.update(hand, gestures.state, events, now)
+            # A pending destructive action is cancelled by any deliberate
+            # gesture, because cancelling must always be easier than confirming.
+            if events and confirmer.is_counting:
+                confirmer.cancel("gesture", now)
+            fired = confirmer.update(now)
+            if fired is not None:
+                recent_events.append(f"CONFIRMED {fired.action}")
+
             with metrics.timer("stage.dispatch"):
                 records = dispatcher.dispatch(events, now)
 
@@ -263,6 +310,7 @@ def run_mouse(
 
                 lines = [
                     f"clutch    {'ENGAGED' if gs.clutch_engaged else 'released'}"
+                    f"  [{gs.mode}]"
                     f"{'  (FROZEN)' if pstate.frozen else ''}",
                     f"cursor    {pstate.position[0]:7.0f}, {pstate.position[1]:6.0f}"
                     f"   monitor {pstate.monitor}",
@@ -275,6 +323,12 @@ def run_mouse(
                 ]
                 if gs.suppressed_by_motion:
                     lines.append("moving too fast - gestures gated")
+                if face is not None:
+                    identity = dispatcher.identity
+                    mark = "OK" if identity.authenticated else "NO"
+                    lines.append(f"operator  [{mark}] {face.session.describe(now)}")
+                elif cfg.security.require_identity:
+                    lines.append("operator  [NO] face stage unavailable")
                 draw_panel(canvas, lines, origin=(12, 46),
                            title="ARGUS  -  virtual mouse", min_width=390)
 
@@ -286,6 +340,23 @@ def run_mouse(
                          COLORS["accent"] if gs.pinch_index > cfg.gestures.pinch_close
                          else COLORS["ok"])
 
+                if confirmer.is_counting:
+                    # Deliberately large and central: a countdown nobody notices
+                    # is not a safety control.
+                    ch, cw = canvas.shape[0], canvas.shape[1]
+                    pending = confirmer.pending
+                    bx, by = cw // 2 - 230, ch // 2 - 70
+                    cv2.rectangle(canvas, (bx, by), (bx + 460, by + 140),
+                                  COLORS["error"], -1)
+                    draw_text(canvas, pending.description.upper(), (bx + 24, by + 46),
+                              0.85, (250, 250, 250), 2, shadow=False)
+                    draw_text(canvas, f"in {pending.remaining(now):0.1f}s",
+                              (bx + 24, by + 88), 0.75, (250, 250, 250), 2, shadow=False)
+                    draw_text(canvas, "Esc or any gesture cancels", (bx + 24, by + 120),
+                              0.5, (245, 245, 245), 1, shadow=False)
+                    draw_bar(canvas, (bx + 24, by + 128), 412,
+                             1.0 - pending.progress(now), (250, 250, 250), height=6)
+
                 if recent_events:
                     draw_panel(canvas, recent_events[-6:], origin=(canvas.shape[1] - 330, 46),
                                scale=0.45, alpha=0.5, title="events", min_width=300)
@@ -294,8 +365,11 @@ def run_mouse(
                                origin=(12, canvas.shape[0] - 24 - 22 * len(HELP)),
                                scale=0.45, alpha=0.55, color=COLORS["muted"])
 
-            cv2.imshow(window, canvas)
-            key = cv2.waitKey(1) & 0xFF
+            # Timed because it is not free: the preview window is composited by
+            # the OS, and on a scaled display it is rescaled every frame.
+            with metrics.timer("stage.display"):
+                cv2.imshow(window, canvas)
+                key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
             if key == ord("h"):
@@ -307,8 +381,11 @@ def run_mouse(
                 break
     finally:
         # Order matters: release buttons before tearing anything else down.
+        confirmer.cancel("shutting down")
         dispatcher.shutdown()
         injector.disarm()
+        if face is not None:
+            face.close()
         engine.close()
         cam.stop()
         cv2.destroyAllWindows()
@@ -326,6 +403,8 @@ def run_mouse(
     print(f"  actions        : {dispatcher.stats.as_dict()}")
     print(f"  injector       : {injector.stats.as_dict()}")
     print(f"  cursor travel  : {summary.cursor_px:.0f} px")
+    if face is not None:
+        print(f"  identity       : {face.stats()}")
     print(f"  armed for      : {summary.armed_seconds:.1f} s")
 
     if out:

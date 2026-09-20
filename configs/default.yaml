@@ -61,6 +61,10 @@ capture:
 face:
   enabled: true
   gallery_path: data/gallery.npz
+  # Cadence while nobody is authenticated. Once a session opens this stops
+  # entirely until security.reverify_interval_s elapses, so identity gating
+  # costs almost nothing in steady state.
+  detect_every_n_frames: 5
   detector:
     conf_threshold: 0.5
     min_face_px: 40
@@ -84,3 +88,14 @@ ui:
   show_window: true
   window_name: ARGUS
   preview_width: 1280
+
+security:
+  # Turn this on once you have enrolled:  argus enroll <your name>
+  # Cursor motion rides an authenticated session; destructive actions need a
+  # match within fresh_match_within_s.
+  require_identity: false
+  operator: ""
+  session_timeout_s: 120.0
+  reverify_interval_s: 15.0
+  fresh_match_within_s: 5.0
+  confirm_countdown_s: 5.0

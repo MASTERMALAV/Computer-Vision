@@ -96,9 +96,44 @@ def _stats(values: list[float]) -> dict:
     }
 
 
+# Physically plausible ranges for each pose, in hand-scale units. These are
+# properties of human hands, not tuning knobs: the thumb tip simply cannot sit
+# 1.3 wrist-widths from the index tip while the two are touching.
+#
+# Checking only that the poses *separate* from each other is not enough. A run
+# where the operator never actually pinched produced cleanly separated but
+# nonsensical values - a "pinch" of 1.29 and a "point" of 0.90 - which would
+# have made the system click continuously. Separation is necessary; being in the
+# right part of the scale is what says the pose was really performed.
+PLAUSIBLE = {
+    "pinch": (0.05, 0.60, "PINCH", "your thumb and index fingertips must actually touch"),
+    "pinch_middle": (0.05, 0.60, "MIDDLE PINCH", "your thumb and middle fingertips must touch"),
+    "open": (0.55, 2.20, "OPEN HAND", "hold your thumb clearly away from your index finger"),
+    "extended": (1.00, 1.90, "POINTING", "straighten your index finger fully"),
+    "curled": (0.10, 0.95, "RELAXED", "curl your fingers into a loose fist"),
+}
+
+
+def implausible(results: dict[str, dict]) -> list[str]:
+    """Poses whose measurements are outside what a hand can physically do."""
+    problems: list[str] = []
+    for key, (low, high, title, advice) in PLAUSIBLE.items():
+        stats = results.get(key)
+        if not stats:
+            continue
+        median = stats["p50"]
+        if not (low <= median <= high):
+            problems.append(
+                f"the {title} pose measured {median:.2f}, outside the plausible "
+                f"range {low:.2f}-{high:.2f}. That pose was probably not performed "
+                f"as intended - {advice}."
+            )
+    return problems
+
+
 def derive_thresholds(results: dict[str, dict]) -> tuple[dict, list[str]]:
     """Turn measured pose distributions into thresholds, with warnings."""
-    warnings: list[str] = []
+    warnings: list[str] = implausible(results)
     out: dict[str, float] = {}
 
     open_s, pinch_s = results.get("open"), results.get("pinch")
@@ -137,6 +172,12 @@ def derive_thresholds(results: dict[str, dict]) -> tuple[dict, list[str]]:
         curled = min(extended - 0.15, curl["p95"] + 0.03)
         out["finger_extended"] = round(float(extended), 3)
         out["finger_curled"] = round(float(curled), 3)
+        # Scroll mode asks whether the *middle* finger is extended, which is the
+        # same physical question as for the index. Deriving it from the same
+        # measurement keeps the two consistent - a fixed default can otherwise
+        # end up below the calibrated "curled" threshold, which would mean a
+        # curled middle finger reads as a request to scroll.
+        out["scroll_middle_extended"] = round(float(extended), 3)
 
     return out, warnings
 
@@ -269,12 +310,24 @@ def run_calibration(cfg: ArgusConfig, write: str | None = None) -> int:
     thresholds, warnings = derive_thresholds(measured)
     print()
     if warnings:
-        print("  Warnings")
+        print("  Problems")
         for w in warnings:
             print(f"    ! {w}")
         print()
     if not thresholds:
         print("  Not enough clean data to derive thresholds.\n")
+        return 1
+
+    if implausible(measured):
+        # Writing these would be worse than writing nothing: the defaults at
+        # least work, whereas thresholds fitted to a pose that never happened
+        # make the system fire continuously or never at all.
+        print("  Refusing to save thresholds derived from implausible measurements.")
+        print("  Re-run and hold each pose exactly as described:")
+        print("    - PINCH means the thumb and index fingertips touching")
+        print("    - POINTING means the index finger fully straight")
+        print("  Keep your whole hand inside the frame and reasonably close to the camera.")
+        print()
         return 1
 
     print("  Derived thresholds")

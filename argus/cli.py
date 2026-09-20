@@ -8,6 +8,8 @@ Every phase of the system is reachable from one entry point::
     argus hands              # live hand landmark preview
     argus mouse              # the virtual mouse
     argus calibrate          # fit gesture thresholds to your hand
+    argus enroll <name>      # enrol a face for identity gating
+    argus face               # live face recognition preview
     argus screens            # display layout + DPI
     argus bench capture      # headless throughput benchmark
     argus config             # show the effective configuration
@@ -186,6 +188,32 @@ def cmd_mouse(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# face
+# --------------------------------------------------------------------------- #
+def cmd_enroll(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .face.enroll import run_enrolment
+
+    return run_enrolment(cfg, args.name, per_pose=args.samples, reset=args.reset)
+
+
+def cmd_faces(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .face.enroll import forget, show_gallery
+
+    if args.forget:
+        return forget(cfg, args.forget)
+    return show_gallery(cfg, analyse=args.analyse)
+
+
+def cmd_face_preview(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .face.preview import run_face_preview
+
+    return run_face_preview(cfg, seconds=args.seconds)
+
+
+# --------------------------------------------------------------------------- #
 # calibrate
 # --------------------------------------------------------------------------- #
 def cmd_calibrate(args: argparse.Namespace) -> int:
@@ -283,6 +311,10 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
         return bench_hands(cfg, seconds=args.seconds, out=args.out,
                            renegotiate=args.renegotiate)
+    if args.target == "face":
+        from .face.preview import bench_face
+
+        return bench_face(cfg, seconds=args.seconds, out=args.out)
     print(f"Unknown benchmark target: {args.target}", file=sys.stderr)
     return 2
 
@@ -332,7 +364,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_bench = sub.add_parser("bench", help="run a headless benchmark")
     _add_common(p_bench)
-    p_bench.add_argument("target", choices=["capture", "hands"], help="what to benchmark")
+    p_bench.add_argument(
+        "target", choices=["capture", "hands", "face"], help="what to benchmark"
+    )
     p_bench.add_argument("--seconds", type=float, default=15.0, help="benchmark duration")
     p_bench.add_argument("--out", default=None, help="write JSON results to this path")
     p_bench.set_defaults(func=cmd_bench)
@@ -351,6 +385,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_mouse.add_argument("--out", default=None, help="write a session report to this path")
     p_mouse.set_defaults(func=cmd_mouse)
+
+    p_enroll = sub.add_parser("enroll", help="enrol a face so actions can be identity-gated")
+    _add_common(p_enroll)
+    p_enroll.add_argument("name", help="who is being enrolled")
+    p_enroll.add_argument("--samples", type=int, default=6, help="samples per pose (5 poses)")
+    p_enroll.add_argument(
+        "--reset", action="store_true", help="discard the existing gallery first"
+    )
+    p_enroll.set_defaults(func=cmd_enroll)
+
+    p_faces = sub.add_parser("faces", help="list enrolled identities")
+    _add_common(p_faces)
+    p_faces.add_argument(
+        "--analyse", action="store_true", help="report similarity separation and a threshold"
+    )
+    p_faces.add_argument("--forget", metavar="NAME", default=None, help="remove an identity")
+    p_faces.set_defaults(func=cmd_faces)
+
+    p_face = sub.add_parser("face", help="live face detection and recognition preview")
+    _add_common(p_face)
+    p_face.add_argument("--seconds", type=float, default=0.0, help="auto-exit after N seconds")
+    p_face.set_defaults(func=cmd_face_preview)
 
     p_cal = sub.add_parser("calibrate", help="fit gesture thresholds to your hand")
     _add_common(p_cal)

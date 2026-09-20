@@ -171,6 +171,8 @@ class GestureConfig:
     click_cooldown_s: float = 0.25
     double_click_s: float = 0.40
     motion_gate_speed: float = 2.6
+    scroll_middle_extended: float = 1.05
+    scroll_debounce_frames: int = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -183,6 +185,14 @@ class GainCurveConfig:
     min_gain: float = 0.55
     max_gain: float = 3.4
     pixels_per_unit: float = 900.0
+
+
+@dataclass
+class ScrollSettings:
+    units_per_notch: float = 0.16
+    dead_zone: float = 0.01
+    max_notches_per_frame: int = 3
+    invert: bool = False
 
 
 @dataclass
@@ -210,6 +220,7 @@ class ControlConfig:
     max_jump_px: float = 1400.0
     gain: GainCurveConfig = field(default_factory=GainCurveConfig)
     smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
+    scroll: ScrollSettings = field(default_factory=ScrollSettings)
     # Which hand may drive the cursor: Left | Right | any
     hand: str = "any"
 
@@ -359,6 +370,13 @@ class ArgusConfig:
             raise ConfigError("control.source must be palm|index_mcp|index_tip")
         if self.control.hand not in {"Left", "Right", "any"}:
             raise ConfigError("control.hand must be Left|Right|any")
+        if self.control.scroll.units_per_notch <= 0:
+            raise ConfigError("control.scroll.units_per_notch must be positive")
+        if self.gestures.scroll_middle_extended <= self.gestures.finger_curled:
+            raise ConfigError(
+                "gestures.scroll_middle_extended must be above finger_curled, or "
+                "a curled middle finger would trigger scroll mode"
+            )
         gc = self.control.gain
         if gc.slow_speed >= gc.fast_speed:
             raise ConfigError("control.gain.slow_speed must be < fast_speed")

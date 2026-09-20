@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -23,9 +23,12 @@ import numpy as np
 from ..config import CameraConfig
 from ..logsetup import get_logger
 from .devices import CameraDevice, DeviceError, backend_flag, resolve_device
-from .negotiate import CaptureProfile, apply_format, negotiate
+from .negotiate import CaptureProfile, apply_format, clear_cache, negotiate
 
 log = get_logger("capture.camera")
+
+# Tried in order when the negotiated backend stops delivering frames.
+FALLBACK_BACKENDS = ("dshow", "msmf", "any")
 
 
 @dataclass(frozen=True)
@@ -138,9 +141,26 @@ class CameraStream:
             return self.profile.backend
         return self.config.backend
 
-    def _open(self) -> Any:
-        import cv2
+    # Reopen attempts when the device opens but yields no frames, which
+    # happens when a previous process's capture handle is still being released.
+    OPEN_ATTEMPTS = 3
+    OPEN_RETRY_DELAY_S = 0.8
 
+    def _open(self) -> Any:
+        """Open the camera, falling back to another backend if necessary.
+
+        The negotiated backend is normally right, but a capture backend can go
+        bad at runtime independently of our code: on Windows, Media Foundation
+        will keep reporting a device as openable while returning no frames at
+        all, after a process holding it exited uncleanly. DirectShow continues
+        to work in that state.
+
+        Since the negotiated choice is cached, a wedged backend would otherwise
+        make every future run fail identically. So a persistent no-frames
+        failure is treated as a property of the backend rather than of the
+        camera: the alternatives are tried, and the cached verdict is discarded
+        so the next run re-measures from scratch.
+        """
         dev = self.device
 
         # Measure which backend actually delivers this format on this camera -
@@ -153,7 +173,42 @@ class CameraStream:
                 self.config,
                 use_cache=not self._renegotiate,
             )
-        backend = self.profile.backend
+
+        preferred = self.profile.backend
+        candidates = [preferred]
+        if self.config.backend in ("auto", "any"):
+            candidates += [b for b in FALLBACK_BACKENDS if b != preferred]
+
+        first_error: BaseException | None = None
+        for i, backend in enumerate(candidates):
+            try:
+                cap = self._open_with(backend)
+            except CameraError as exc:
+                first_error = first_error or exc
+                if i + 1 < len(candidates):
+                    log.warning(
+                        "%s backend is not delivering frames; falling back to %s",
+                        backend, candidates[i + 1],
+                    )
+                continue
+            if backend != preferred:
+                # Remember the working backend for this session and force a
+                # fresh measurement next time rather than trusting the old one.
+                log.warning(
+                    "recovered using the %s backend; clearing the cached "
+                    "capture profile so it is re-measured next run",
+                    backend,
+                )
+                self.profile = replace(self.profile, backend=backend)
+                clear_cache()
+            return cap
+
+        raise first_error or CameraError(f"Could not open camera {dev.label}.")
+
+    def _open_with(self, backend: str, attempt: int = 0) -> Any:
+        import cv2
+
+        dev = self.device
 
         log.info(
             "opening camera %s via %s at %dx%d@%d",
@@ -187,10 +242,25 @@ class CameraStream:
                 break
             time.sleep(0.05)
         else:
+            # The device handle opened but produced nothing. The usual cause is
+            # that a previous process has exited but Windows has not finished
+            # tearing down its capture handle yet, which is common when two
+            # ARGUS commands run back to back. Reopening after a short pause
+            # recovers it; only a persistent failure is a real error.
             cap.release()
+            if attempt + 1 < self.OPEN_ATTEMPTS:
+                log.warning(
+                    "camera %s opened but delivered no frames; retrying in %.1fs "
+                    "(attempt %d of %d)",
+                    dev.label, self.OPEN_RETRY_DELAY_S, attempt + 2, self.OPEN_ATTEMPTS,
+                )
+                time.sleep(self.OPEN_RETRY_DELAY_S)
+                return self._open_with(backend, attempt=attempt + 1)
             raise CameraError(
-                f"Camera {dev.label} opened but delivered no frames. "
-                "It may be in use by another application."
+                f"Camera {dev.label} opened but delivered no frames after "
+                f"{self.OPEN_ATTEMPTS} attempts on the {backend} backend.\n"
+                "  - another application (Teams, Zoom, the Camera app) may be holding it\n"
+                "  - a previous ARGUS run may not have exited cleanly"
             )
 
         log.info(

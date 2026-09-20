@@ -41,9 +41,67 @@ log = get_logger("control.pointer")
 
 
 @dataclass
+class ScrollConfig:
+    """Two-finger scroll.
+
+    Scroll notches are accumulated from fractional hand movement rather than
+    emitted per frame, so a slow deliberate drag produces a steady trickle of
+    notches instead of nothing at all, and a fast flick produces several.
+    """
+
+    # Hand travel, in hand-scale units, for one wheel notch.
+    units_per_notch: float = 0.16
+    # Ignore movement below this to stop a resting hand from creeping.
+    dead_zone: float = 0.01
+    # Cap per frame, so one landmark glitch cannot scroll a document to the end.
+    max_notches_per_frame: int = 3
+    # Natural scrolling: moving the hand up scrolls the content up.
+    invert: bool = False
+
+
+class ScrollEngine:
+    """Turns vertical hand movement into mouse wheel notches."""
+
+    def __init__(self, config: ScrollConfig | None = None) -> None:
+        self.config = config or ScrollConfig()
+        self._accumulator = 0.0
+        self._prev_y: float | None = None
+
+    def reset(self) -> None:
+        self._accumulator = 0.0
+        self._prev_y = None
+
+    def update(self, palm_y: float, hand_scale: float, active: bool) -> int:
+        """Return whole wheel notches to emit this frame."""
+        if not active or hand_scale <= 1e-6:
+            self.reset()
+            return 0
+        if self._prev_y is None:
+            self._prev_y = palm_y
+            return 0
+
+        delta_units = (palm_y - self._prev_y) / hand_scale
+        self._prev_y = palm_y
+        if abs(delta_units) < self.config.dead_zone:
+            return 0
+
+        # Screen y grows downward; a wheel notch is positive when scrolling up.
+        direction = 1.0 if self.config.invert else -1.0
+        self._accumulator += direction * delta_units / max(self.config.units_per_notch, 1e-6)
+
+        notches = int(self._accumulator)
+        if notches:
+            self._accumulator -= notches
+            limit = self.config.max_notches_per_frame
+            notches = max(-limit, min(limit, notches))
+        return notches
+
+
+@dataclass
 class PointerConfig:
     gain: GainConfig = field(default_factory=GainConfig)
     euro: OneEuroConfig = field(default_factory=OneEuroConfig)
+    scroll: "ScrollConfig" = field(default_factory=lambda: ScrollConfig())
 
     # palm | index_mcp | index_tip
     # 'palm' is the default because it is immune to click-induced drift.
@@ -80,6 +138,7 @@ class PointerState:
     gain: float = 1.0
     moved_px: float = 0.0
     monitor: int = 0
+    scroll_notches: int = 0
 
 
 class PointerEngine:
@@ -94,6 +153,7 @@ class PointerEngine:
         self.config = config or PointerConfig()
 
         self._filter = OneEuroFilter(self.config.euro)
+        self.scroll = ScrollEngine(self.config.scroll)
         self._history = PositionHistory(seconds=0.5)
         self._prev_source: np.ndarray | None = None
         self._prev_time: float | None = None
@@ -181,10 +241,28 @@ class PointerEngine:
         self.state.hand_speed = gesture_state.hand_speed
         self.state.moved_px = 0.0
 
+        self.state.scroll_notches = 0
+
         if hand is None or not gesture_state.clutch_engaged:
             self._prev_source = None
             self._prev_time = None
+            self.scroll.reset()
             return self.state
+
+        # Scroll mode drives the wheel instead of the cursor. The pointer is
+        # deliberately left where it is: scrolling a window should not also move
+        # the pointer out of it.
+        if gesture_state.mode == "scroll":
+            notches = self.scroll.update(
+                float(hand.palm_center[1]), hand.scale, active=True
+            )
+            if notches:
+                self.injector.scroll(notches)
+                self.state.scroll_notches = notches
+            self._prev_source = None
+            self._prev_time = None
+            return self.state
+        self.scroll.reset()
 
         raw = self._source_point(hand)
         smoothed = np.asarray(self._filter(raw, now), dtype=np.float64)

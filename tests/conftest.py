@@ -3,6 +3,15 @@
 Building hands analytically rather than replaying recordings means a test can
 state precisely what it is testing - "a pinch of 0.30 hand-scale units at twice
 the distance from the camera" - and the assertion has no ambiguity.
+
+One thing this deliberately does *not* do is let a caller specify every distance
+independently. A hand has fewer degrees of freedom than that: with the index
+extended and the middle curled, the thumb physically cannot be 0.15 hand-widths
+from the middle fingertip *and* 0.95 from the index fingertip, because those two
+tips are two hand-widths apart. So the thumb is placed relative to one named
+target and the other distances follow from the geometry, exactly as on a real
+hand. An earlier version of this fixture allowed the contradiction, which
+silently produced hands whose middle finger was implausibly extended.
 """
 
 from __future__ import annotations
@@ -30,19 +39,30 @@ def make_hand(
     pinch_index: float = 0.9,
     pinch_middle: float = 0.9,
     index_extension: float = 1.3,
+    middle_extension: float = 0.75,
+    thumb: str = "index",
     handedness: str = "Right",
     frame_size: tuple[int, int] = (1280, 720),
 ) -> Hand:
     """A synthetic hand with the requested normalised measurements.
 
-    ``palm`` positions the wrist; ``scale`` is the wrist-to-middle-MCP span in
-    pixels, which is what every normalised distance divides by. The resulting
-    hand satisfies, to floating-point precision:
+    Args:
+        palm: wrist position in pixels.
+        scale: wrist-to-middle-MCP span in pixels - the unit every normalised
+            distance divides by.
+        index_extension: index tip distance from its MCP, over hand scale.
+        middle_extension: same for the middle finger. Below ~1.0 the finger is
+            curled toward the palm, which is the pointing pose; above ~1.05 it
+            is extended, which is the two-finger scroll pose.
+        thumb: which fingertip the thumb is placed relative to - ``"index"``
+            uses ``pinch_index``, ``"middle"`` uses ``pinch_middle``.
 
-        hand.scale                    == scale
-        hand.pinch("index")           == pinch_index
-        hand.pinch("middle")          == pinch_middle
-        hand.finger_extension("index")== index_extension
+    Guarantees, to floating-point precision::
+
+        hand.scale                       == scale
+        hand.finger_extension("index")   == index_extension
+        hand.finger_extension("middle")  == middle_extension
+        hand.pinch(thumb)                == pinch_index / pinch_middle
     """
     s = float(scale)
     wx, wy = float(palm[0]), float(palm[1])
@@ -55,12 +75,22 @@ def make_hand(
     pts[RING_MCP] = (wx - 0.25 * s, wy - 0.95 * s)
     pts[PINKY_MCP] = (wx - 0.50 * s, wy - 0.85 * s)
 
-    # |index_tip - index_mcp| == index_extension * s
-    pts[INDEX_TIP] = pts[INDEX_MCP] + np.array([0.0, -index_extension * s], dtype=np.float32)
-    # |thumb_tip - index_tip| == pinch_index * s
-    pts[THUMB_TIP] = pts[INDEX_TIP] + np.array([pinch_index * s, 0.0], dtype=np.float32)
-    # |middle_tip - thumb_tip| == pinch_middle * s
-    pts[MIDDLE_TIP] = pts[THUMB_TIP] + np.array([0.0, -pinch_middle * s], dtype=np.float32)
+    # An extended finger points away from the palm; a curled one folds back
+    # toward it. Either way the tip sits exactly `extension * scale` from its
+    # knuckle, which is what finger_extension() measures.
+    def fingertip(mcp: np.ndarray, extension: float) -> np.ndarray:
+        direction = np.array([0.0, -1.0]) if extension >= 1.0 else np.array([0.0, 1.0])
+        return (mcp + direction * extension * s).astype(np.float32)
+
+    pts[INDEX_TIP] = fingertip(pts[INDEX_MCP], index_extension)
+    pts[MIDDLE_TIP] = fingertip(pts[MIDDLE_MCP], middle_extension)
+
+    if thumb == "middle":
+        pts[THUMB_TIP] = pts[MIDDLE_TIP] + np.array([pinch_middle * s, 0.0], dtype=np.float32)
+    elif thumb == "index":
+        pts[THUMB_TIP] = pts[INDEX_TIP] + np.array([pinch_index * s, 0.0], dtype=np.float32)
+    else:
+        raise ValueError(f"thumb must be 'index' or 'middle', got {thumb!r}")
 
     # Remaining joints get plausible positions; no test depends on them.
     for idx in range(NUM_LANDMARKS):
@@ -77,6 +107,20 @@ def make_hand(
     )
 
 
+def pointing_hand(**kw) -> Hand:
+    """Clutch engaged, one finger out - the cursor pose."""
+    kw.setdefault("index_extension", 1.3)
+    kw.setdefault("middle_extension", 0.75)
+    return make_hand(**kw)
+
+
+def scrolling_hand(**kw) -> Hand:
+    """Clutch engaged, two fingers out - the scroll pose."""
+    kw.setdefault("index_extension", 1.3)
+    kw.setdefault("middle_extension", 1.3)
+    return make_hand(**kw)
+
+
 @pytest.fixture
 def hand():
     return make_hand()
@@ -84,11 +128,11 @@ def hand():
 
 @pytest.fixture
 def open_hand():
-    """Clutch engaged, both pinches well open."""
-    return make_hand(pinch_index=0.95, pinch_middle=0.95, index_extension=1.3)
+    """Clutch engaged, pinch open."""
+    return pointing_hand(pinch_index=0.95)
 
 
 @pytest.fixture
 def pinched_hand():
     """Clutch engaged, index pinch closed."""
-    return make_hand(pinch_index=0.20, pinch_middle=0.95, index_extension=1.3)
+    return pointing_hand(pinch_index=0.20)

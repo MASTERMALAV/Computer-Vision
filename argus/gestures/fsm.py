@@ -276,6 +276,11 @@ class GestureThresholds:
     # so gesture transitions are ignored until the hand settles.
     motion_gate_speed: float = 2.6
 
+    # Extending the middle finger alongside the index switches to scroll,
+    # matching the one-finger-move / two-finger-scroll trackpad convention.
+    scroll_middle_extended: float = 1.05
+    scroll_debounce_frames: int = 3
+
 
 @dataclass
 class GestureState:
@@ -289,6 +294,9 @@ class GestureState:
     hand_present: bool = False
     extensions: dict[str, float] = field(default_factory=dict)
     suppressed_by_motion: bool = False
+    # "point" while one finger is out, "scroll" while two are.
+    mode: str = "point"
+
 
 
 class GestureEngine:
@@ -299,6 +307,7 @@ class GestureEngine:
         self.state = GestureState()
 
         self.clutch_debounce = Debouncer(self.t.clutch_debounce_frames)
+        self.scroll_debounce = Debouncer(self.t.scroll_debounce_frames)
         self.left_click = PinchDetector(
             "index",
             close_at=self.t.pinch_close,
@@ -416,6 +425,13 @@ class GestureEngine:
                     GestureEvent(GestureType.DRAG_END, now, label, detail="clutch released")
                 )
 
+        # ---- mode: pointing or scrolling --------------------------------- #
+        scrolling = self.scroll_debounce.update(
+            self.state.clutch_engaged
+            and hand.finger_extension("middle") > self.t.scroll_middle_extended
+        )
+        self.state.mode = "scroll" if scrolling else "point"
+
         # ---- pinches ----------------------------------------------------- #
         # Landmarks are least trustworthy while the hand is moving fast, and a
         # fast-moving hand is not trying to click. Gate new transitions on that,
@@ -423,7 +439,14 @@ class GestureEngine:
         fast = speed > self.t.motion_gate_speed
         self.state.suppressed_by_motion = fast
 
-        if self.state.clutch_engaged and (not fast or self.left_click.dragging):
+        # Clicking is disabled while scrolling: the hand shape for two-finger
+        # scroll brings the thumb close to the middle finger, which would
+        # otherwise read as a right click on almost every scroll.
+        if (
+            self.state.clutch_engaged
+            and self.state.mode == "point"
+            and (not fast or self.left_click.dragging)
+        ):
             events += self.left_click.update(self.state.pinch_index, now, label)
             # Only consider a right click when the index pinch is clearly open,
             # so the two cannot fire from one ambiguous hand shape.
@@ -445,6 +468,7 @@ class GestureEngine:
     def reset(self) -> None:
         self.state = GestureState()
         self.clutch_debounce.reset(False)
+        self.scroll_debounce.reset(False)
         self.left_click.reset()
         self.right_click.reset()
         self._prev_palm = None

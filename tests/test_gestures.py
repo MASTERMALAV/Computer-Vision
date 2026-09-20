@@ -13,7 +13,7 @@ from argus.gestures.fsm import (
     SchmittTrigger,
 )
 
-from conftest import make_hand
+from conftest import make_hand, pointing_hand, scrolling_hand
 
 DT = 1.0 / 30.0
 
@@ -253,9 +253,13 @@ def test_click_requires_engaged_clutch():
 def test_middle_pinch_produces_a_right_click_not_a_left_one():
     e = GestureEngine()
     c = Clock()
-    feed(e, make_hand(index_extension=1.3, pinch_index=0.95, pinch_middle=0.95), 6, c)
-    events = feed(e, make_hand(index_extension=1.3, pinch_index=0.95, pinch_middle=0.15), 5, c)
-    events += feed(e, make_hand(index_extension=1.3, pinch_index=0.95, pinch_middle=0.95), 5, c)
+    # The thumb moves to the middle fingertip, which necessarily leaves it far
+    # from the index tip - the same constraint a real hand has.
+    open_hand = pointing_hand(thumb="middle", pinch_middle=0.95)
+    closed = pointing_hand(thumb="middle", pinch_middle=0.15)
+    feed(e, open_hand, 6, c)
+    events = feed(e, closed, 5, c)
+    events += feed(e, open_hand, 5, c)
     kinds = types_of(events)
     assert GestureType.RIGHT_CLICK in kinds
     assert GestureType.CLICK not in kinds, "thumb-middle must never emit a left click"
@@ -332,3 +336,53 @@ def test_fast_motion_gates_new_gestures():
         events += e.update(h, c.tick())
     assert e.state.suppressed_by_motion
     assert GestureType.CLICK not in types_of(events)
+
+
+# --------------------------------------------------------------------------- #
+# Two-finger scroll
+# --------------------------------------------------------------------------- #
+def test_one_finger_is_point_mode():
+    e = GestureEngine()
+    feed(e, pointing_hand(pinch_index=0.95), 8)
+    assert e.state.clutch_engaged
+    assert e.state.mode == "point"
+
+
+def test_two_fingers_is_scroll_mode():
+    e = GestureEngine()
+    feed(e, scrolling_hand(pinch_index=0.95), 8)
+    assert e.state.clutch_engaged, "scrolling must keep the clutch engaged"
+    assert e.state.mode == "scroll"
+
+
+def test_switching_modes_does_not_release_the_clutch():
+    """Moving between pointing and scrolling must not re-anchor the cursor."""
+    e = GestureEngine()
+    c = Clock()
+    events = feed(e, pointing_hand(pinch_index=0.95), 8, c)
+    events += feed(e, scrolling_hand(pinch_index=0.95), 8, c)
+    events += feed(e, pointing_hand(pinch_index=0.95), 8, c)
+    assert e.state.clutch_engaged
+    assert GestureType.CLUTCH_RELEASE not in types_of(events)
+
+
+def test_no_clicks_while_scrolling():
+    """The two-finger pose brings the thumb near the middle finger; without
+    this guard almost every scroll would also fire a right click."""
+    e = GestureEngine()
+    c = Clock()
+    feed(e, scrolling_hand(pinch_index=0.95), 6, c)
+    events = feed(e, scrolling_hand(thumb="middle", pinch_middle=0.12), 6, c)
+    events += feed(e, scrolling_hand(pinch_index=0.95), 6, c)
+    kinds = types_of(events)
+    assert GestureType.CLICK not in kinds
+    assert GestureType.RIGHT_CLICK not in kinds
+
+
+def test_scroll_mode_is_debounced():
+    """A single frame of a misread middle finger must not flip into scroll."""
+    e = GestureEngine()
+    c = Clock()
+    feed(e, pointing_hand(pinch_index=0.95), 8, c)
+    e.update(scrolling_hand(pinch_index=0.95), c.tick())
+    assert e.state.mode == "point", "one frame must not switch modes"

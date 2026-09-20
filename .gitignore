@@ -21,6 +21,9 @@ models/**
 data/**
 !data/.gitkeep
 
+# --- Operator-specific calibration (fitted to one person's hand) ---
+configs/calibrated.yaml
+
 # --- Runtime output ---
 logs/
 captures/
@@ -34,3 +37,4 @@ benchmarks/**
 Thumbs.db
 desktop.ini
 .DS_Store
+configs/calibrated.yaml.rejected
