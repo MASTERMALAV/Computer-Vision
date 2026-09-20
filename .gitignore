@@ -1,0 +1,36 @@
+# NOTE: in .gitignore, '#' only starts a comment at the START of a line.
+# A trailing comment after a pattern becomes part of the pattern and silently
+# matches nothing. Every comment here is therefore on its own line.
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Downloaded model weights (fetch with `python -m argus models pull`) ---
+models/**
+!models/.gitkeep
+
+# --- PRIVATE: enrolled identities, face embeddings, captured frames ---
+# Biometric data must never leave this machine.
+data/**
+!data/.gitkeep
+
+# --- Runtime output ---
+logs/
+captures/
+*.log
+
+# --- Benchmark results (machine-specific) ---
+benchmarks/**
+!benchmarks/.gitkeep
+
+# --- OS ---
+Thumbs.db
+desktop.ini
+.DS_Store

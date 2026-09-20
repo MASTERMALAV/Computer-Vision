@@ -1,0 +1,86 @@
+# ARGUS default configuration
+#
+# Every value here mirrors a field in argus/config.py. Anything you leave out
+# keeps its default. Unknown keys are a hard error, so a typo is caught at
+# startup instead of silently doing nothing.
+#
+# Inspect the fully resolved result at any time with:
+#     python -m argus config
+
+runtime:
+  # fast | balanced | accurate
+  #   fast      - smaller detector, lighter hand model, detect every 3rd frame
+  #   balanced  - the sensible default for a 4-core laptop CPU
+  #   accurate  - SCRFD-10G + ArcFace R50; best quality, needs headroom
+  # A profile sets several knobs at once; anything you set explicitly below
+  # still wins over the profile.
+  profile: balanced
+  log_level: INFO
+  # This machine has 4 physical cores and also runs capture + MediaPipe, so
+  # ONNX Runtime does not get to take all of them.
+  onnx_intra_threads: 2
+  onnx_inter_threads: 1
+
+capture:
+  camera:
+    # Which camera to use. Accepts:
+    #   auto    - highest scoring device (prefers an external colour camera)
+    #   brio    - case-insensitive substring of the device name
+    #   1       - an explicit OpenCV device index
+    # List what is connected with:  python -m argus cameras
+    device: auto
+
+    # auto | dshow | msmf | any
+    # dshow (DirectShow) is the reliable choice on Windows: stable index-to-name
+    # mapping and proper MJPG support on USB webcams.
+    backend: auto
+
+    width: 1280
+    height: 720
+    fps: 30
+
+    # MJPG matters. Without it a USB webcam negotiates raw YUY2 and the bus
+    # limits 720p to roughly 10 fps.
+    fourcc: MJPG
+
+    # Mirror the image so moving your hand right moves it right on screen.
+    mirror: true
+
+    # Never auto-select a Windows Hello infrared camera: it produces greyscale
+    # IR images that face recognition models were not trained on.
+    exclude_ir: true
+
+    # null leaves the driver's own setting alone; true/false forces it.
+    autofocus: null
+    autoexposure: null
+
+  # Detectors run on a downscaled copy; full resolution is kept for face crops
+  # and for the preview window.
+  detect_width: 640
+
+face:
+  enabled: true
+  gallery_path: data/gallery.npz
+  detector:
+    conf_threshold: 0.5
+    min_face_px: 40
+  recognizer:
+    # Cosine similarity needed to accept a match. Raise it if the system
+    # mistakes someone else for you; lower it if it fails to recognise you.
+    match_threshold: 0.42
+    margin_threshold: 0.05
+
+hands:
+  enabled: true
+  max_hands: 2
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+audio:
+  # Phase 4. Off until the voice stack is installed.
+  enabled: false
+
+ui:
+  show_window: true
+  window_name: ARGUS
+  preview_width: 1280

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus"
+version = "0.1.0"
+description = "Real-time face, gesture and voice perception - CPU-first"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "numpy>=2.1,<2.4",
+    "opencv-python>=4.10",
+    "onnxruntime>=1.20",
+    "mediapipe>=0.10.14",
+    "PyYAML>=6.0.2",
+    "rich>=13.9",
+    "scikit-learn>=1.5",
+]
+
+[project.optional-dependencies]
+# Friendly DirectShow device names on Windows, so cameras can be picked by name.
+windows = ["pygrabber>=0.2"]
+# Phase 4 voice stack.
+audio = ["sounddevice>=0.5", "faster-whisper>=1.1", "onnxruntime>=1.20"]
+dev = ["pytest>=8.3", "pytest-timeout>=2.3", "ruff>=0.7"]
+
+[project.scripts]
+argus = "argus.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["argus*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "camera: requires a physical camera (deselect with '-m \"not camera\"')",
+    "models: requires downloaded model weights",
+    "audio: requires a microphone",
+    "slow: takes more than a couple of seconds",
+]
+timeout = 120
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",  # function call in default argument - not a pattern we use
+    "SIM108",  # ternaries are not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]

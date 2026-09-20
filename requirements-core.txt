@@ -1,0 +1,29 @@
+# --- ARGUS core perception stack (CPU-first) ---
+#
+# Install with:
+#     .venv\Scripts\python.exe -m pip install -r requirements-core.txt
+
+numpy>=2.1,<2.4
+
+# IMPORTANT: opencv-contrib-python only, NOT opencv-python.
+# mediapipe depends on opencv-contrib-python, and both packages install into the
+# same `cv2` directory. Having both means whichever pip installed last silently
+# wins, while the other package's metadata claims to own the same files. Pinning
+# the contrib build (a superset of opencv-python) keeps exactly one OpenCV.
+# The 4.12 line is used deliberately: OpenCV 5.0 is new and mediapipe 0.10.x is
+# not built against it.
+opencv-contrib-python==4.12.0.88
+
+onnxruntime==1.22.1
+mediapipe==0.10.35
+PyYAML>=6.0.2
+rich>=13.9
+scikit-learn>=1.5
+
+# Windows only: recovers DirectShow camera names in the same order OpenCV uses,
+# so cameras can be selected by name ("brio") instead of a guessed index.
+pygrabber>=0.2 ; sys_platform == "win32"
+
+# --- dev / test ---
+pytest>=8.3
+pytest-timeout>=2.3
