@@ -220,7 +220,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
     from .gestures.calibrate import run_calibration
 
-    return run_calibration(cfg, write=args.write)
+    return run_calibration(cfg, write=args.write, countdown=args.countdown)
 
 
 # --------------------------------------------------------------------------- #
@@ -416,6 +416,12 @@ def build_parser() -> argparse.ArgumentParser:
         const="configs/calibrated.yaml",
         default=None,
         help="write the fitted thresholds to a config file (default: configs/calibrated.yaml)",
+    )
+    p_cal.add_argument(
+        "--countdown",
+        type=float,
+        default=8.0,
+        help="seconds to read each instruction and get into position (default: 8)",
     )
     p_cal.set_defaults(func=cmd_calibrate)
 
