@@ -5,7 +5,7 @@
 # startup instead of silently doing nothing.
 #
 # Inspect the fully resolved result at any time with:
-#     python -m argus config
+#     argus config
 
 runtime:
   # fast | balanced | accurate
@@ -27,7 +27,7 @@ capture:
     #   auto    - highest scoring device (prefers an external colour camera)
     #   brio    - case-insensitive substring of the device name
     #   1       - an explicit OpenCV device index
-    # List what is connected with:  python -m argus cameras
+    # List what is connected with:  argus cameras
     device: auto
 
     # auto | dshow | msmf | any

@@ -2,15 +2,15 @@
 
 Every phase of the system is reachable from one entry point::
 
-    python -m argus cameras            # discover and choose a camera
-    python -m argus preview            # live capture preview + FPS
-    python -m argus models pull        # fetch model weights
-    python -m argus hands              # live hand landmark preview
-    python -m argus mouse              # the virtual mouse
-    python -m argus calibrate          # fit gesture thresholds to your hand
-    python -m argus screens            # display layout + DPI
-    python -m argus bench capture      # headless throughput benchmark
-    python -m argus config             # show the effective configuration
+    argus cameras            # discover and choose a camera
+    argus preview            # live capture preview + FPS
+    argus models pull        # fetch model weights
+    argus hands              # live hand landmark preview
+    argus mouse              # the virtual mouse
+    argus calibrate          # fit gesture thresholds to your hand
+    argus screens            # display layout + DPI
+    argus bench capture      # headless throughput benchmark
+    argus config             # show the effective configuration
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def cmd_cameras(args: argparse.Namespace) -> int:
 
     if selected_index >= 0:
         print(f"\n  Current selection: [{selected_index}] (config: capture.camera.device)")
-    print("\n  Choose one with:   python -m argus preview --camera brio")
+    print("\n  Choose one with:   argus preview --camera brio")
     print("  Make it permanent: --set capture.camera.device=brio in configs/default.yaml\n")
     return 0
 
@@ -263,7 +263,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         print(f"  [{mark:>11}] {row['name']:<16} {size:>9}  {row['description']}")
         print(f"                {' ' * 16} {row['credit']}")
     print()
-    print("  Fetch what the current profile needs:  python -m argus models pull")
+    print("  Fetch what the current profile needs:  argus models pull")
     print()
     return 0
 

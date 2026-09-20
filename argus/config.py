@@ -157,7 +157,7 @@ class GestureConfig:
 
     Every distance is divided by the user's own wrist-to-knuckle span, so these
     thresholds hold at any distance from the camera. Measure values fitted to
-    your own hand with: python -m argus calibrate
+    your own hand with: argus calibrate
     """
 
     pinch_close: float = 0.34

@@ -253,7 +253,7 @@ class PinchDetector:
 class GestureThresholds:
     """All tunable gesture geometry, in hand-scale units.
 
-    Defaults are starting points. ``python -m argus calibrate`` measures your
+    Defaults are starting points. ``argus calibrate`` measures your
     own hand and writes values fitted to it, which matters because thumb length
     relative to palm span varies a lot between people.
     """

@@ -8,7 +8,7 @@ but behaves subtly differently.
 Checksums below were computed from the actual downloads used to develop and
 benchmark this system. Verify with:
 
-    python -m argus models verify
+    argus models verify
 """
 
 from __future__ import annotations

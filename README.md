@@ -45,15 +45,27 @@ ground, blended with a smoothstep so you never feel the change.
 
 ```bash
 py -3.12 -m venv .venv
+```
+```bash
 .venv\Scripts\python.exe -m pip install -r requirements-core.txt
+```
+```bash
 .venv\Scripts\python.exe -m argus models pull
 ```
 
 ## Use it
 
+Run everything through `argus.cmd` in the project root. It invokes the project's
+virtualenv directly, so it works regardless of which Python happens to be first on
+`PATH` — a plain `python -m argus` will fail with `ModuleNotFoundError: No module named
+'yaml'` if it picks up a system interpreter instead of `.venv`.
+
 ```bash
-python -m argus mouse
+argus mouse
 ```
+
+(From PowerShell, `.\argus.cmd mouse`. Or call the interpreter explicitly:
+`.venv\Scripts\python.exe -m argus mouse`.)
 
 It starts **disarmed**: the full pipeline runs and the HUD shows exactly what it *would*
 do, but nothing touches your cursor until you press **F9**.
@@ -69,8 +81,8 @@ Fit the gesture thresholds to your own hand — worth doing once, since thumb pr
 vary enough to matter:
 
 ```bash
-python -m argus calibrate --write
-python -m argus mouse -c configs/calibrated.yaml
+argus calibrate --write
+argus mouse -c configs/calibrated.yaml
 ```
 
 Other commands: `cameras`, `preview`, `hands`, `screens`, `models`, `config`,
@@ -172,8 +184,10 @@ error grows with distance from the origin.
 ## Testing
 
 ```bash
-.venv\Scripts\python.exe -m pytest        # 132 tests, no hardware required
+.venv\Scripts\python.exe -m pytest
 ```
+
+132 tests, no hardware required.
 
 Gestures and cursor maths are tested against **synthetic hands** with exactly specified
 geometry, so a test can assert something precise — "the same pinch at four times the

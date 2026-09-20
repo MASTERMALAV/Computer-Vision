@@ -284,7 +284,7 @@ def run_calibration(cfg: ArgusConfig, write: str | None = None) -> int:
         print(f"    {key:<18} {value}{arrow}")
 
     lines = ["# Gesture thresholds fitted to this operator by `argus calibrate`.",
-             "# Load with:  python -m argus mouse -c configs/calibrated.yaml",
+             "# Load with:  argus mouse -c configs/calibrated.yaml",
              "gestures:"]
     lines += [f"  {k}: {v}" for k, v in thresholds.items()]
     text = "\n".join(lines) + "\n"
@@ -296,7 +296,7 @@ def run_calibration(cfg: ArgusConfig, write: str | None = None) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         print(f"\n  Written to {path}")
-        print(f"  Use it with:  python -m argus mouse -c {path.name}")
+        print(f"  Use it with:  argus mouse -c {path.name}")
     else:
         print("\n  Add to your config (or re-run with --write configs/calibrated.yaml):\n")
         print("    " + text.replace("\n", "\n    "))
