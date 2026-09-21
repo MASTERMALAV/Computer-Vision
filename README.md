@@ -11,6 +11,24 @@ spot and point again, exactly like lifting a mouse off a pad.
 
 Actions can be gated on your face, so the cursor only answers to you.
 
+## What it does
+
+| | |
+|---|---|
+| **Cursor** | Relative hand motion with velocity-dependent gain, One Euro filtering, and a clutch so your hand can stay low near the desk |
+| **Click** | Thumb-to-index tap. Left, and double |
+| **Right click** | Thumb-to-middle tap |
+| **Drag** | Thumb-to-index held, then move |
+| **Scroll** | Thumb-to-middle held, then move. Speed-boosted, with inertial coasting |
+| **Identity** | Optional. Face recognition gates actions to an enrolled operator, on a session rather than per frame |
+| **Displays** | Full multi-monitor support including negative coordinates and per-monitor DPI |
+| **Camera** | Discovery, measured backend selection, visual picker, live switching |
+| **Calibration** | Fits every gesture threshold to your own hand, and refuses implausible measurements |
+| **Safety** | Disarmed by default, hardware-level panic key, buttons always released, cancellable countdown for destructive actions |
+| **Feedback** | Full preview, compact status pill, or no window at all |
+
+Everything runs locally on the CPU. Nothing is uploaded anywhere.
+
 ---
 
 ## The interaction model, and why it is not what you would first guess
@@ -343,11 +361,28 @@ full landmarks -> gestures -> pointer -> dispatch chain.
 - [x] **Phase 4** Cursor core: filtering, gain, clutch, injection
 - [x] **Phase 5** Click, right-click, double-click, drag
 - [x] **Phase 6** Face recognition, enrolment, authenticated sessions, identity gating
-- [x] **Phase 7a** Two-finger scroll, cancellable confirmation countdown
-- [ ] **Phase 7b** Two-hand zoom, voice
+- [x] **Phase 7a** Scroll (held middle pinch, with momentum), cancellable confirmation
+- [x] **Phase 7b** Status pill / headless mode, live camera switching
 
 `security.require_identity` defaults to `false` so the system is usable before anyone
 enrols; turn it on after `argus enroll`.
+
+### Planned, not yet built
+
+Listed so nothing here is mistaken for a feature that exists:
+
+- [ ] **Typing suppression** - ignore hand gestures briefly after each keystroke, so an
+      index finger resting over the keyboard cannot twitch the cursor mid-sentence
+- [ ] **Action layer** - a rotary "knob" gesture for volume and brightness, and launching
+      an application. Turning clockwise raises, anticlockwise lowers
+- [ ] **Practice mode** - Fitts-law target practice that reports throughput in bits/s, so
+      pointer gain can be tuned from data rather than from feel
+- [ ] **Monitor jumping** - a single action to throw the cursor across a 4480 px desktop
+- [ ] **`argus doctor`** - one health check for camera, models, DPI and threshold margins
+- [ ] **Two-camera view selection** - use whichever camera currently sees the hand less
+      edge-on. Not stereo depth: no calibration between the cameras, just picking the
+      better view
+- [ ] Voice
 
 ## Privacy
 

@@ -237,6 +237,21 @@ or just choose the other camera.
 
 ---
 
+## Not built yet
+
+So you are not hunting for controls that do not exist, these are **planned but not
+implemented**:
+
+- **Volume and brightness by turning a knob** - rotate your hand clockwise to raise,
+  anticlockwise to lower
+- **Launching an app** with a gesture
+- **Typing suppression** - ignoring gestures for a moment after each keystroke
+- **Practice mode** - target practice that measures how good the pointing actually is
+- **Jumping the cursor between monitors**
+- **`argus doctor`** - one command that checks everything is healthy
+
+---
+
 ## Face recognition (optional)
 
 Only needed if you want the cursor to respond to you and nobody else.
