@@ -21,6 +21,10 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 import yaml
 
+from .logsetup import get_logger
+
+log = get_logger("config")
+
 # Repository root: <root>/argus/config.py -> <root>
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = ROOT / "models"
@@ -30,6 +34,23 @@ CONFIGS_DIR = ROOT / "configs"
 
 class ConfigError(ValueError):
     """Raised when a configuration file or override is malformed."""
+
+
+# Keys that were valid in an earlier version. They are accepted and ignored
+# rather than rejected: a config file written against an older release was
+# correct when it was written, and failing to load it punishes the user for a
+# change they did not make. Each entry says what replaced it.
+DEPRECATED_KEYS: dict[str, str] = {
+    "gestures.scroll_middle_extended": (
+        "scrolling is now a held thumb-to-middle pinch rather than a two-finger "
+        "pose, so this threshold is no longer read. Remove it, or re-run "
+        "`argus calibrate --write`. See gestures.scroll_dwell_s."
+    ),
+    "gestures.scroll_debounce_frames": (
+        "the two-finger scroll pose it debounced no longer exists. Remove it, "
+        "or re-run `argus calibrate --write`."
+    ),
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -490,6 +511,9 @@ def _merge_into(node: Any, raw: dict[str, Any], prefix: str) -> Any:
     for key, value in raw.items():
         dotted = f"{prefix}{key}"
         if key not in known:
+            if dotted in DEPRECATED_KEYS:
+                log.warning("ignoring retired setting %r: %s", dotted, DEPRECATED_KEYS[dotted])
+                continue
             valid = ", ".join(sorted(known))
             raise ConfigError(f"Unknown config key {dotted!r}. Valid keys here: {valid}")
         current = getattr(node, key)
@@ -520,6 +544,12 @@ def _apply_override(cfg: ArgusConfig, item: str) -> ArgusConfig:
             raise ConfigError(f"{'.'.join(parts[: i + 1])!r} is a value, not a section")
     leaf = parts[-1]
     if not hasattr(node, leaf):
+        if dotted.strip() in DEPRECATED_KEYS:
+            log.warning(
+                "ignoring retired setting %r: %s",
+                dotted.strip(), DEPRECATED_KEYS[dotted.strip()],
+            )
+            return cfg
         raise ConfigError(f"Unknown config key {dotted!r}")
     hints = get_type_hints(type(node))
     setattr(node, leaf, _coerce(yaml.safe_load(value), hints[leaf], dotted))

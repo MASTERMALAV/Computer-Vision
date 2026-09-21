@@ -125,3 +125,42 @@ def test_shipped_default_config_is_valid():
     path = ROOT / "configs" / "default.yaml"
     if path.exists():
         ArgusConfig.load(path).validate()
+
+
+# --------------------------------------------------------------------------- #
+# Retired keys
+#
+# Unknown keys are a hard error so a typo fails loudly. A key that used to be
+# valid is different: the user's file was correct when written, and the software
+# changed underneath it. Scroll moved from a two-finger pose to a held middle
+# pinch, which retired gestures.scroll_middle_extended - and every previously
+# written calibration file contains it.
+# --------------------------------------------------------------------------- #
+def test_retired_key_is_ignored_not_rejected(tmp_path):
+    path = tmp_path / "old.yaml"
+    path.write_text(
+        "gestures:\n  pinch_close: 0.2\n  scroll_middle_extended: 0.958\n",
+        encoding="utf-8",
+    )
+    cfg = ArgusConfig.load(path)
+    cfg.validate()
+    assert cfg.gestures.pinch_close == 0.2
+
+
+def test_retired_key_as_an_override_is_ignored():
+    cfg = ArgusConfig.load(None, ["gestures.scroll_middle_extended=1.0"])
+    cfg.validate()
+
+
+def test_a_genuine_typo_is_still_rejected():
+    with pytest.raises(ConfigError, match="Unknown config key"):
+        ArgusConfig.load(None, ["gestures.pinch_clsoe=0.3"])
+
+
+def test_retired_keys_all_name_their_replacement():
+    from argus.config import DEPRECATED_KEYS
+
+    assert DEPRECATED_KEYS
+    for key, message in DEPRECATED_KEYS.items():
+        assert "." in key, "a retired key must be a dotted path"
+        assert len(message) > 30, f"{key} needs an explanation, not a stub"

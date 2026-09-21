@@ -2,6 +2,9 @@
 
 Everything in plain language. Keep this open the first few times.
 
+Run commands from the project folder. **The leading `.\` matters** - PowerShell will not
+run a program from the current directory without it.
+
 ---
 
 ## The one idea behind it all
@@ -97,7 +100,7 @@ Run it once. It measures *your* hand, because thumb length relative to palm size
 lot between people.
 
 ```bash
-argus calibrate --write
+.\argus calibrate --write
 ```
 
 You get **8 seconds per pose** to read the instruction and get into position, then about
@@ -148,7 +151,7 @@ The defaults work fine, so a refused calibration leaves you no worse off.
 If ARGUS is using the wrong camera, pick one by eye:
 
 ```bash
-argus cameras --pick
+.\argus cameras --pick
 ```
 
 It shows each working camera live, one at a time. **N** = next, **ENTER** = choose this
@@ -161,7 +164,7 @@ which camera is live.
 To see what was found without choosing:
 
 ```bash
-argus cameras --scan
+.\argus cameras --scan
 ```
 
 ### Why a camera is named like `msmf:0`
@@ -189,7 +192,7 @@ delivers, and identifies unnamed ones by comparing what they see against the nam
 ### Pinning a camera by hand
 
 ```bash
-argus mouse --camera msmf:0
+.\argus mouse --camera msmf:0
 ```
 
 or in `configs/default.yaml`:
@@ -215,7 +218,7 @@ or just choose the other camera.
 Only needed if you want the cursor to respond to you and nobody else.
 
 ```bash
-argus enroll "Your Name"
+.\argus enroll "Your Name"
 ```
 
 Five head poses: straight on, slightly left, slightly right, slightly down, and leaning in.
@@ -225,7 +228,7 @@ cut off - so a sample is sometimes skipped, which is normal.
 Then:
 
 ```bash
-argus mouse --set security.require_identity=true --set security.operator="Your Name"
+.\argus mouse --set security.require_identity=true --set security.operator="Your Name"
 ```
 
 **How the gating behaves:** it recognises you once and then keeps a *session* open. You can

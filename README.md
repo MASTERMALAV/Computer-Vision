@@ -76,8 +76,13 @@ directly, so it works regardless of which Python is first on `PATH` - a plain
 `python -m argus` fails with `ModuleNotFoundError: No module named 'yaml'` if it picks up a
 system interpreter instead of `.venv`.
 
+**Note the leading `.\`.** PowerShell does not run programs from the current directory
+without it, so `argus mouse` gives *"The term 'argus' is not recognized"* while
+`.\argus mouse` works. The `.\` form is also correct in `cmd.exe`, so every example
+below uses it.
+
 ```bash
-argus mouse
+.\argus mouse
 ```
 
 It starts **disarmed**: the full pipeline runs and the HUD shows exactly what it *would*
@@ -90,8 +95,9 @@ do, but nothing touches your cursor until you press **F9**.
 | **F10** | re-centre the cursor on the primary display |
 | `q` | quit |
 
-From PowerShell use `.\argus.cmd mouse`; `.venv\Scripts\python.exe -m argus mouse` also
-works.
+If you would rather not type the `.\` each time, add the project folder to your
+`PATH`, or call the interpreter directly:
+`.venv\Scripts\python.exe -m argus mouse`.
 
 ### Fit it to your hand
 
@@ -100,10 +106,10 @@ on one hand reads 0.40 on another, and a threshold set between those either fire
 constantly or never fires at all.
 
 ```bash
-argus calibrate --write
+.\argus calibrate --write
 ```
 ```bash
-argus mouse -c configs/calibrated.yaml
+.\argus mouse -c configs/calibrated.yaml
 ```
 
 ### Identity gating
@@ -111,7 +117,7 @@ argus mouse -c configs/calibrated.yaml
 Enrol your face, then let only you drive the cursor:
 
 ```bash
-argus enroll "Your Name"
+.\argus enroll "Your Name"
 ```
 
 Enrolment walks through five head poses and only accepts frames where the face is large
@@ -121,10 +127,10 @@ how well your samples separate from anyone else enrolled, and suggests a thresho
 from *your* data rather than taken from a paper.
 
 ```bash
-argus faces --analyse
+.\argus faces --analyse
 ```
 ```bash
-argus mouse --set security.require_identity=true --set security.operator="Your Name"
+.\argus mouse --set security.require_identity=true --set security.operator="Your Name"
 ```
 
 `argus face` shows live detection, recognition and session state.
@@ -132,7 +138,7 @@ argus mouse --set security.require_identity=true --set security.operator="Your N
 ### Choosing a camera
 
 ```bash
-argus cameras --pick
+.\argus cameras --pick
 ```
 
 Shows each working camera live and saves your choice. Press **c** during `argus mouse` to
