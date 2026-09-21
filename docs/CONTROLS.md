@@ -35,8 +35,8 @@ cursor does not slide off the thing you were aiming at.
 | **Thumb taps index twice quickly** | Double click |
 | **Thumb holds index** (~0.35 s) then move | Drag - release the pinch to drop |
 | **Thumb holds middle** (~0.30 s) then move up/down | Scroll - release to stop |
-| **Open your whole hand**, then turn your wrist | **Volume** - clockwise up, anticlockwise down |
-| **Two fingers up (a V)**, then turn your wrist | **Brightness** - clockwise up, anticlockwise down |
+| **Open your whole hand**, move it up / down | **Volume** up / down |
+| **Two fingers up (a V)**, move up / down | **Brightness** up / down |
 | **Thumbs up**, held ~0.9 s | **Launch WhatsApp** |
 
 ### Which fingers, exactly
@@ -249,74 +249,77 @@ or just choose the other camera.
 
 ## Volume, brightness and launching an app
 
-These are **poses**, not pinches. Your thumb and two fingers already carry four actions
-between them, which is about as much as two fingers can say without getting confused, so
-anything else uses the shape of the whole hand.
+Three whole-hand poses. Your thumb and two fingers already carry four actions between
+them, so these use the shape of the hand instead.
 
-### Turning a knob
+### Volume - open your whole hand, then move it up or down
 
-| Pose | Controls |
-|---|---|
-| **Open palm** - all fingers spread | Volume |
-| **V sign** - index and middle up, ring and pinky curled | Brightness |
+1. **Spread your whole hand open**, fingers apart, palm toward the camera.
+2. The panel shows **[open_palm/volume]**. The cursor stops moving - that is how you know
+   it registered.
+3. **Move your hand up to raise the volume, down to lower it.** Like a slider.
 
-Make the pose, then **turn your wrist as if turning a dial**. Clockwise raises, anticlockwise
-lowers. Keep turning as far as you like - unlike sliding your hand, a turn never runs out of
-room, which is exactly why a knob is the right shape for a volume control.
+That is all. You are not turning anything - just moving your open hand up and down.
 
-The cursor holds still while you are turning, so you never lose your place.
+### Brightness - two fingers up, then move up or down
 
-About 9 degrees of turn is one step. To change that:
+1. **Index and middle fingers up, ring and pinky folded down.** A peace sign.
+2. The panel shows **[v_sign/brightness]**.
+3. **Move your hand up to brighten, down to dim.**
 
-```bash
-.\argus mouse --set actions.rotation.degrees_per_step=6
-```
+**Brightness only works on the laptop screen.** External monitors need a protocol called
+DDC/CI which most implement badly, so ARGUS says it is unavailable rather than pretending.
+Check with `.\argus doctor --live`.
 
-If the direction feels backwards, flip it:
+### Launch WhatsApp - thumbs up, and hold
 
-```bash
-.\argus mouse --set actions.rotation.invert=false
-```
+1. **Thumbs up**: fingers folded, thumb clearly out.
+2. The panel counts up - **launching 40%... 70%...** - so you can see it registering.
+3. At 100% it launches. Then **drop the pose** before doing it again; holding longer does
+   nothing, by design, so one gesture opens one copy.
 
-**Brightness works on the laptop screen only.** External monitors need DDC/CI, which most
-of them implement badly or not at all, so ARGUS says it is unavailable rather than
-pretending. Check with `.\argus actions`.
+If the counter does not appear, the pose is not being seen. Keep your whole hand in frame
+and make the thumb clearly separate from your fingers.
 
-### Launching an app
+### If a pose will not register
 
-Hold a **thumbs up** for about a second. The hold is deliberate - a thumbs-up meant for a
-person in the room should not start an application - and it fires once, not repeatedly,
-however long you keep holding it.
-
-First tell it what to launch:
+Open the full panel and watch the pose readout:
 
 ```bash
-.\argus actions --find whatsapp --write
+.\argus mouse --hud full
 ```
 
-That finds the app on *your* machine and saves it. Store app IDs are different on every
-machine, so there is nothing sensible to hardcode. Check it works:
+The panel shows the pose it currently sees, like `[open_palm/volume]` or `[unknown/point]`.
+If it says `unknown`, the hand shape is between poses - spread your fingers further, or
+fold the spare ones further down.
+
+### Preferring a dial to a slider
+
+If you would rather turn your wrist like a volume knob than slide your hand:
 
 ```bash
-.\argus actions --test-launch
+.\argus mouse --set actions.rotation.mode=rotate
 ```
 
-Any app works, not just WhatsApp - `--find spotify`, `--find notepad`, and so on.
+Then, in either pose, **turn your wrist like a steering wheel** - clockwise raises,
+anticlockwise lowers. A turn never runs out of room, which is its one real advantage. The
+slider is the default because volume and brightness are bounded at 0 and 100, and a slider
+is what people reach for unprompted.
 
-### Seeing what is set up
+Other settings worth knowing:
 
 ```bash
-.\argus actions
+.\argus mouse --set actions.rotation.units_per_step=0.05   # finer steps
+.\argus mouse --set actions.rotation.invert=true           # flip the direction
+.\argus mouse --set actions.brightness_percent=3           # gentler brightness
+.\argus mouse --set actions.launch_hold_s=1.5              # longer hold to launch
 ```
-
-Shows the gestures, whether brightness is available on your display, and what will be
-launched.
 
 ### The safety rules are the same as for clicking
 
-Changing the volume is not as serious as a click, but it is still an effect on your
-machine, so it obeys the same three rules: the system must be **armed** (F9), the operator
-must be **recognised** if identity gating is on, and **nothing fires while you are typing**.
+Changing the volume is still an effect on your machine, so it obeys the same three rules:
+the system must be **armed** (F9), the operator must be **recognised** if identity gating
+is on, and **nothing fires while you are typing**.
 
 ---
 

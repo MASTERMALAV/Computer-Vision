@@ -279,3 +279,78 @@ def test_a_knob_does_not_hijack_a_drag_in_progress():
     kinds = types_of(events)
     if GestureType.KNOB_START in kinds and GestureType.DRAG_END in kinds:
         assert kinds.index(GestureType.DRAG_END) < kinds.index(GestureType.KNOB_START)
+
+
+# --------------------------------------------------------------------------- #
+# Reported from real use, and reproduced here
+#
+# With the operator's own calibration (extended 0.958 from the index finger,
+# curled 0.267 from a tight fist) the V sign never registered at all and the
+# thumbs up worked roughly half the time. Both came from applying one finger's
+# thresholds to every finger.
+# --------------------------------------------------------------------------- #
+REAL_EXTENDED = 0.958
+REAL_CURLED = 0.267
+
+
+def real_thresholds():
+    return PoseThresholds(extended=REAL_EXTENDED, curled=REAL_CURLED, thumb_out=0.95)
+
+
+# Measured spans for a hand held naturally, not posed for the machine.
+OUT = {"index": 1.15, "middle": 1.25, "ring": 1.10, "pinky": 0.88}
+FOLDED = {"index": 0.45, "middle": 0.48, "ring": 0.45, "pinky": 0.40}
+
+
+def natural_hand(index, middle, ring, pinky, thumb_far=False):
+    return hand_with(index, middle, ring, pinky, thumb_far=thumb_far)
+
+
+def test_a_short_pinky_no_longer_breaks_the_open_palm():
+    """The pinky is about 78% of the index. One threshold asked it to be as
+    long, so an open palm depended on luck - and when it failed the clutch
+    stayed engaged and the cursor kept moving."""
+    hand = natural_hand(OUT["index"], OUT["middle"], OUT["ring"], OUT["pinky"])
+    assert classify(hand, real_thresholds()) is Pose.OPEN_PALM
+
+
+def test_loosely_folded_fingers_make_a_v_sign():
+    """Calibrated 'curled' comes from a clenched fist. A V sign folds the spare
+    fingers loosely, and requiring a fist meant it never registered."""
+    hand = natural_hand(OUT["index"], OUT["middle"], FOLDED["ring"], FOLDED["pinky"])
+    assert classify(hand, real_thresholds()) is Pose.V_SIGN
+
+
+def test_a_loose_thumbs_up_registers():
+    hand = natural_hand(
+        FOLDED["index"], FOLDED["middle"], FOLDED["ring"], FOLDED["pinky"], thumb_far=True
+    )
+    assert classify(hand, real_thresholds()) is Pose.THUMBS_UP
+
+
+def test_a_loose_fist_is_still_not_a_thumbs_up():
+    """Relaxing the thumb must not launch an application."""
+    hand = natural_hand(
+        FOLDED["index"], FOLDED["middle"], FOLDED["ring"], FOLDED["pinky"], thumb_far=False
+    )
+    assert classify(hand, real_thresholds()) is Pose.FIST
+
+
+def test_pointing_is_unaffected_by_the_change():
+    hand = natural_hand(OUT["index"], FOLDED["middle"], FOLDED["ring"], FOLDED["pinky"])
+    assert classify(hand, real_thresholds()) is Pose.POINT
+
+
+def test_each_finger_gets_its_own_threshold():
+    from argus.gestures.poses import FINGER_LENGTH_RATIO
+
+    t = real_thresholds()
+    assert t.up_threshold("pinky") < t.up_threshold("index")
+    assert t.up_threshold("middle") > t.up_threshold("index")
+    assert FINGER_LENGTH_RATIO["pinky"] < FINGER_LENGTH_RATIO["index"]
+
+
+def test_down_sits_between_folded_and_extended():
+    t = real_thresholds()
+    for finger in ("index", "middle", "ring", "pinky"):
+        assert REAL_CURLED < t.down_threshold(finger) < t.up_threshold(finger)

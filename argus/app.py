@@ -39,7 +39,7 @@ from .control.typing import TypingConfig, TypingMonitor
 from .control.screens import get_virtual_desktop, jump_target
 from .face.pipeline import FacePipeline
 from .gestures.fsm import GestureEngine, GestureThresholds, GestureType
-from .gestures.poses import RotationConfig
+from .gestures.poses import KnobConfig
 from .hands.engine import HandEngine
 from .logsetup import get_logger
 from .metrics import Metrics
@@ -106,7 +106,10 @@ def _gesture_thresholds(cfg: ArgusConfig) -> GestureThresholds:
         launch_hold_s=cfg.actions.launch_hold_s,
         launch_cooldown_s=cfg.actions.launch_cooldown_s,
         thumb_out=cfg.actions.thumb_out,
-        rotation=RotationConfig(
+        knob=KnobConfig(
+            mode=cfg.actions.rotation.mode,
+            units_per_step=cfg.actions.rotation.units_per_step,
+            dead_zone_units=cfg.actions.rotation.dead_zone_units,
             degrees_per_step=cfg.actions.rotation.degrees_per_step,
             dead_zone_deg=cfg.actions.rotation.dead_zone_deg,
             max_steps_per_frame=cfg.actions.rotation.max_steps_per_frame,
@@ -531,7 +534,7 @@ def run_mouse(
                     lines = [
                         f"camera    {device.name[:22]}  ({device.spec})",
                         f"clutch    {'ENGAGED' if gs.clutch_engaged else 'released'}"
-                        f"  [{gs.mode}]"
+                        f"  [{gs.pose}/{gs.mode}]"
                         f"{'  (FROZEN)' if pstate.frozen else ''}",
                         f"cursor    {pstate.position[0]:7.0f}, {pstate.position[1]:6.0f}"
                         f"   monitor {pstate.monitor}",
@@ -544,6 +547,10 @@ def run_mouse(
                     ]
                     if gs.suppressed_by_motion:
                         lines.append("moving too fast - gestures gated")
+                    if gs.launch_progress > 0:
+                        lines.append(
+                            f"LAUNCH  hold {int(gs.launch_progress * 100)}%"
+                        )
                     if typing.is_suppressing(now):
                         lines.append(
                             f"TYPING - hand ignored for {typing.remaining(now):.2f}s"
@@ -607,6 +614,7 @@ def run_mouse(
                             fps=metrics.fps,
                             frozen=pstate.frozen,
                             typing=typing.is_suppressing(now),
+                            launch_progress=gs.launch_progress,
                             identity=(
                                 dispatcher.identity.name
                                 if cfg.security.require_identity

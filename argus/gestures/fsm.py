@@ -39,13 +39,12 @@ from enum import Enum
 from ..hands.landmarks import Hand
 from ..logsetup import get_logger
 from .poses import (
+    KnobConfig,
+    KnobTracker,
     Pose,
     PoseThresholds,
     PoseTracker,
-    RotationConfig,
-    RotationTracker,
     classify,
-    hand_angle,
 )
 
 log = get_logger("gestures")
@@ -313,7 +312,7 @@ class GestureThresholds:
     launch_hold_s: float = 0.90
     launch_cooldown_s: float = 2.50
     thumb_out: float = 1.05
-    rotation: RotationConfig = field(default_factory=RotationConfig)
+    knob: KnobConfig = field(default_factory=KnobConfig)
 
 
 @dataclass
@@ -336,6 +335,9 @@ class GestureState:
     # True as soon as the hand *looks* like an action pose, before the debounce
     # commits. The cursor stops here; the action still waits.
     action_pending: bool = False
+    # 0..1 while a thumbs-up is being held, so the operator can see it counting
+    # rather than guessing whether the pose registered at all.
+    launch_progress: float = 0.0
 
 
 
@@ -348,7 +350,7 @@ class GestureEngine:
 
         self.clutch_debounce = Debouncer(self.t.clutch_debounce_frames)
         self.poses = PoseTracker(window=5, required=4)
-        self.rotation = RotationTracker(self.t.rotation)
+        self.knob = KnobTracker(self.t.knob)
         self._pose_thresholds = PoseThresholds(
             extended=self.t.finger_extended,
             curled=self.t.finger_curled,
@@ -457,7 +459,7 @@ class GestureEngine:
             self.state.action_pending = False
             self.state.pose = "unknown"
             self.poses.reset()
-            self.rotation.reset()
+            self.knob.reset()
             self._launch_armed = True
             self.clutch_debounce.reset(False)
             self.left_click.reset()
@@ -572,13 +574,13 @@ class GestureEngine:
                 events.append(
                     GestureEvent(GestureType.KNOB_END, now, label, detail=self._active_knob)
                 )
-            self.rotation.reset()
+            self.knob.reset()
             self._active_knob = knob
             if knob:
                 events.append(GestureEvent(GestureType.KNOB_START, now, label, detail=knob))
 
         if self._active_knob:
-            steps = self.rotation.update(hand_angle(hand), active=True)
+            steps = self.knob.update(hand, active=True)
             if steps:
                 self.state.knob_value = steps
                 events.append(
@@ -594,6 +596,10 @@ class GestureEngine:
         # released, so holding a thumbs-up cannot launch repeatedly.
         if pose is Pose.THUMBS_UP:
             held = self.poses.held_for(now)
+            self.state.launch_progress = (
+                min(1.0, held / max(self.t.launch_hold_s, 1e-6))
+                if self._launch_armed else 1.0
+            )
             if (
                 self._launch_armed
                 and held >= self.t.launch_hold_s
@@ -604,6 +610,7 @@ class GestureEngine:
                 events.append(GestureEvent(GestureType.LAUNCH, now, label, value=held))
         else:
             self._launch_armed = True
+            self.state.launch_progress = 0.0
 
         return events
 
@@ -634,7 +641,7 @@ class GestureEngine:
         self.left_click.reset()
         self.right_click.reset()
         self.poses.reset()
-        self.rotation.reset()
+        self.knob.reset()
         self._active_knob = ""
         self._launch_armed = True
         self._prev_palm = None

@@ -25,7 +25,7 @@ Actions can be gated on your face, so the cursor only answers to you.
 | **Camera** | Discovery, measured backend selection, visual picker, live switching |
 | **Calibration** | Fits every gesture threshold to your own hand, and refuses implausible measurements |
 | **Safety** | Disarmed by default, hardware-level panic key, buttons always released, cancellable countdown for destructive actions |
-| **Volume / brightness** | Make a pose and turn your wrist like a dial. A turn has no travel limit, which sliding a hand does |
+| **Volume / brightness** | Open palm or V sign, then move the hand up and down like a slider |
 | **Launch an app** | Thumbs up, held |
 | **Typing** | Gestures ignored briefly after each keystroke, so a finger over the keyboard cannot twitch the cursor |
 | **Monitors** | F10 jumps the cursor to the next display, keeping its relative position |
@@ -74,10 +74,20 @@ movement is boosted with speed and a flick coasts after release, decoupling dist
 scrolled from distance moved. A slow release stops dead, because that is when you are
 positioning carefully.
 
-**Continuous things are turned, not slid.** Volume and brightness are adjusted by making
-a pose and rotating the wrist. Rotation has no travel limit - you can keep turning - which
-is precisely the property hand *translation* lacks, and the reason scrolling needed
-momentum to paper over. A knob needs no such trick.
+**Bounded things are slid; unbounded things are turned.** Volume and brightness run from
+nought to a hundred, so a slider - open the hand, move it up and down - matches both the
+on-screen widget and what people reach for unprompted. Rotation was the first choice,
+because a turn never runs out of room, but that property only earns its keep for unbounded
+quantities like a long document. For a bounded one it costs familiarity and buys nothing.
+Turning is still available with `actions.rotation.mode=rotate`.
+
+**A threshold measured on one finger does not fit the others.** Calibration measures the
+*index* finger, because that is the pointing finger. Applying that number unchanged asked
+the pinky - about 78% as long - to reach the same extension, so an open palm registered
+only by luck. And the "curled" value comes from a clenched fist, while a V sign folds its
+spare fingers loosely; requiring a fist meant the V sign never registered at all. Each
+finger now scales its own threshold by its own length, and counts as down when it is
+nearer folded than extended.
 
 **Gain rises with speed.** A single fixed gain cannot both hit a 16 px close button and
 cross a 4480 px dual-monitor desktop. Slow movements get precision; fast ones cover ground,

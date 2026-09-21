@@ -286,12 +286,22 @@ class ControlConfig:
 # --------------------------------------------------------------------------- #
 @dataclass
 class RotationSettings:
+    """How a held pose turns into steps of a value.
+
+    vertical | rotate. Vertical is the default: volume and brightness are
+    bounded (0-100), and a slider matches both the on-screen widget and what
+    people reach for unprompted. Rotation was chosen first because a turn has
+    no travel limit, but that only helps for unbounded things like a long
+    document.
+    """
+
+    mode: str = "vertical"
+    units_per_step: float = 0.07
+    dead_zone_units: float = 0.004
     degrees_per_step: float = 9.0
     dead_zone_deg: float = 0.8
     max_steps_per_frame: int = 3
-    # The preview is mirrored, which reverses apparent rotation. With this on,
-    # turning clockwise *as you see it* raises the value.
-    invert: bool = True
+    invert: bool = False
 
 
 @dataclass

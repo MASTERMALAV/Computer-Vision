@@ -36,13 +36,46 @@ class Pose(str, Enum):
     FIST = "fist"  # everything curled
 
 
+# Tip-to-knuckle span of each finger, relative to the index. Calibration only
+# ever measures the index - it is the pointing finger - so applying that one
+# number to the others asks the pinky to be as long as the index. It is not.
+FINGER_LENGTH_RATIO: dict[str, float] = {
+    "index": 1.00,
+    "middle": 1.06,
+    "ring": 0.95,
+    "pinky": 0.78,
+}
+
+FINGERS_IN_ORDER = ("index", "middle", "ring", "pinky")
+
+
 @dataclass
 class PoseThresholds:
+    """Where each finger counts as out, and where it counts as down.
+
+    Both are derived from the single calibrated index-finger threshold rather
+    than being set independently, so a calibration stays meaningful.
+    """
+
     extended: float = 1.05
     curled: float = 0.85
     # The thumb is measured from the wrist rather than its own knuckle, which
     # barely moves; below this the thumb is tucked against the palm.
-    thumb_out: float = 1.05
+    thumb_out: float = 0.95
+
+    def up_threshold(self, finger: str) -> float:
+        return self.extended * FINGER_LENGTH_RATIO.get(finger, 1.0)
+
+    def down_threshold(self, finger: str) -> float:
+        """Halfway between clenched and extended, for that finger.
+
+        The calibrated ``curled`` value comes from a tight fist. Poses like a V
+        sign or a thumbs up fold the spare fingers loosely, nowhere near a fist,
+        so requiring them to reach it meant those poses essentially never
+        registered. Nearer-folded-than-extended is the question that actually
+        matters.
+        """
+        return (self.curled + self.up_threshold(finger)) / 2.0
 
 
 def classify(hand: Hand, t: PoseThresholds | None = None) -> Pose:
@@ -53,18 +86,16 @@ def classify(hand: Hand, t: PoseThresholds | None = None) -> Pose:
     """
     t = t or PoseThresholds()
     ext = hand.extensions()
-    index, middle = ext["index"], ext["middle"]
-    ring, pinky = ext["ring"], ext["pinky"]
-    thumb = ext["thumb"]
 
-    out = [f > t.extended for f in (index, middle, ring, pinky)]
-    tucked = [f < t.curled for f in (index, middle, ring, pinky)]
+    out = [ext[f] > t.up_threshold(f) for f in FINGERS_IN_ORDER]
+    down = [ext[f] < t.down_threshold(f) for f in FINGERS_IN_ORDER]
+    thumb = ext["thumb"]
 
     if all(out):
         return Pose.OPEN_PALM
-    if out[0] and out[1] and tucked[2] and tucked[3]:
+    if out[0] and out[1] and down[2] and down[3]:
         return Pose.V_SIGN
-    if all(tucked):
+    if all(down):
         return Pose.THUMBS_UP if thumb > t.thumb_out else Pose.FIST
     if out[0] and not out[1]:
         return Pose.POINT
@@ -188,6 +219,87 @@ class RotationTracker:
         self._accumulator -= steps
         limit = self.config.max_steps_per_frame
         return max(-limit, min(limit, steps))
+
+
+@dataclass
+class KnobConfig:
+    """How a held pose turns into steps of a value.
+
+    ``vertical`` is the default. Volume and brightness are *bounded* - nought to
+    a hundred - and a slider is the shape people reach for, matching both the
+    on-screen widget and what an operator does without being told. Rotation was
+    the first choice because a turn has no travel limit, but that property only
+    matters for unbounded things like a long document; for a bounded one it buys
+    nothing and costs familiarity.
+    """
+
+    mode: str = "vertical"  # vertical | rotate
+
+    # vertical: hand travel, in hand-scale units, per step
+    units_per_step: float = 0.07
+    dead_zone_units: float = 0.004
+
+    # rotate: degrees of wrist turn per step
+    degrees_per_step: float = 9.0
+    dead_zone_deg: float = 0.8
+
+    max_steps_per_frame: int = 3
+    invert: bool = False
+
+
+class KnobTracker:
+    """Turns a held pose plus hand movement into signed steps."""
+
+    def __init__(self, config: KnobConfig | None = None) -> None:
+        self.config = config or KnobConfig()
+        self._previous: float | None = None
+        self._accumulator = 0.0
+
+    def reset(self) -> None:
+        self._previous = None
+        self._accumulator = 0.0
+
+    def update(self, hand: Hand, active: bool) -> int:
+        if not active:
+            self.reset()
+            return 0
+        if self.config.mode == "rotate":
+            return self._step(hand_angle(hand), rotational=True)
+        # Screen y grows downward, so moving the hand *up* must increase.
+        scale = max(hand.scale, 1e-6)
+        return self._step(-float(hand.palm_center[1]) / scale, rotational=False)
+
+    def _step(self, value: float, rotational: bool) -> int:
+        cfg = self.config
+        if self._previous is None:
+            self._previous = value
+            return 0
+
+        delta = value - self._previous
+        if rotational:
+            # atan2 wraps at 180; unwrap or the seam reads as a huge turn.
+            while delta > 180.0:
+                delta -= 360.0
+            while delta < -180.0:
+                delta += 360.0
+        self._previous = value
+
+        dead = cfg.dead_zone_deg if rotational else cfg.dead_zone_units
+        per_step = cfg.degrees_per_step if rotational else cfg.units_per_step
+        limit = 60.0 if rotational else 0.5
+        if abs(delta) < dead:
+            return 0
+        if abs(delta) > limit:
+            return 0  # a tracking glitch, not a hand
+
+        direction = -1.0 if cfg.invert else 1.0
+        self._accumulator += direction * delta / max(per_step, 1e-6)
+        steps = int(self._accumulator)
+        if not steps:
+            return 0
+        self._accumulator -= steps
+        cap = cfg.max_steps_per_frame
+        return max(-cap, min(cap, steps))
 
 
 def angular_span(angles: list[float]) -> float:

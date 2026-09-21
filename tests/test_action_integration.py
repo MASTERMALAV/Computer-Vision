@@ -98,18 +98,39 @@ def test_turning_an_open_palm_changes_the_volume(rig):
     assert any("volume" in n for n in notes)
 
 
-def test_direction_is_signed(rig):
-    engine = GestureEngine()
-    up = run(engine, 26, lambda i: rotating_palm(i, +4.0))
-    dispatch(up, rig)
-    _, _, _, system = rig
-    forward = sum(system.volume)
+def sliding_palm(index: int, pixels_per_frame: float):
+    """An open palm moved vertically, without turning."""
+    h = hand_with(1.3, 1.3, 1.3, 1.3)
+    h.pixels[:, 1] += index * pixels_per_frame
+    return h
 
-    engine2 = GestureEngine()
-    down = run(engine2, 26, lambda i: rotating_palm(i, -4.0))
+
+def test_moving_the_palm_up_and_down_goes_opposite_ways(rig):
+    """The default knob is a slider: up raises, down lowers."""
+    _, _, _, system = rig
+
+    engine = GestureEngine()
+    dispatch(run(engine, 26, lambda i: sliding_palm(i, -6.0)), rig)  # upwards
+    raised = sum(system.volume)
+
     system.volume.clear()
-    dispatch(down, rig)
-    backward = sum(system.volume)
+    engine2 = GestureEngine()
+    dispatch(run(engine2, 26, lambda i: sliding_palm(i, +6.0)), rig)  # downwards
+    lowered = sum(system.volume)
+
+    assert raised > 0, "moving the hand up must raise the volume"
+    assert lowered < 0, "moving the hand down must lower it"
+
+
+def test_rotation_mode_still_works_and_is_signed():
+    """The turn-a-dial mode remains available for anyone who prefers it."""
+    from argus.gestures.poses import KnobConfig, KnobTracker
+
+    clockwise = KnobTracker(KnobConfig(mode="rotate", degrees_per_step=8.0))
+    anticlockwise = KnobTracker(KnobConfig(mode="rotate", degrees_per_step=8.0))
+
+    forward = sum(clockwise.update(rotating_palm(i, +4.0), True) for i in range(26))
+    backward = sum(anticlockwise.update(rotating_palm(i, -4.0), True) for i in range(26))
 
     assert forward != 0 and backward != 0
     assert (forward > 0) != (backward > 0), "opposite turns must go opposite ways"

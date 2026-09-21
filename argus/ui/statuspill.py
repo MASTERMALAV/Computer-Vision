@@ -74,6 +74,7 @@ class PillState:
     identity: str = ""
     frozen: bool = False
     typing: bool = False
+    launch_progress: float = 0.0
     note: str = ""
 
 
@@ -164,7 +165,10 @@ class StatusPill:
         draw_text(canvas, label, (16, 26), 0.62, accent, 2)
 
         if state.armed:
-            if state.typing:
+            if state.launch_progress > 0.0:
+                status = f"launching {int(state.launch_progress * 100)}%"
+                colour = COLORS["accent"]
+            elif state.typing:
                 status, colour = "typing...", COLORS["warn"]
             elif not state.engaged:
                 status, colour = "parked", COLORS["muted"]
@@ -215,6 +219,7 @@ class StatusPill:
         signature = (
             state.armed, state.engaged, state.mode, state.frozen, state.typing,
             round(state.pinch, 2), round(state.fps), state.note, state.identity,
+            round(state.launch_progress, 1),
         )
         due = (now - self._last_draw) >= self._interval
         if not due and signature == self._last_signature:
