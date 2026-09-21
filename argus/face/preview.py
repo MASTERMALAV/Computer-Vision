@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from ..capture.camera import CameraStream
-from ..capture.devices import resolve_device
+from ..capture.picker import select_camera
 from ..config import ROOT, ArgusConfig
 from ..logsetup import get_logger
 from ..metrics import Metrics
@@ -47,11 +47,7 @@ def run_face_preview(cfg: ArgusConfig, seconds: float = 0.0) -> int:
         print(f"\n  {exc}\n")
         return 2
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device).start()
     metrics = Metrics(window=cfg.runtime.metrics_window)
 
@@ -160,11 +156,7 @@ def bench_face(cfg: ArgusConfig, seconds: float = 20.0, out: str | None = None) 
     gallery = Gallery.load(cfg.face.gallery_path, model=cfg.face.recognizer.model,
                            strict_model=False)
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device).start()
 
     print(

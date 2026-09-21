@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .capture.camera import CameraStream
-from .capture.devices import resolve_device
+from .capture.picker import best_candidate, load_scan, select_camera
 from .config import ROOT, ArgusConfig
 from .control.confirm import Confirmer
 from .control.dispatcher import ActionDispatcher
@@ -101,6 +101,7 @@ HELP = [
     "F9       arm / disarm cursor control",
     "Esc      HOLD to disarm (works anywhere)",
     "F10      re-centre cursor on primary",
+    "c        switch camera",
     "point    one finger moves the cursor",
     "scroll   two fingers scroll",
     "q        quit    h  hide this panel",
@@ -129,12 +130,18 @@ def run_mouse(
     desktop = get_virtual_desktop()
     log.info("display layout:\n%s", desktop.describe())
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device, renegotiate=renegotiate).start()
+
+    # Cameras the operator can cycle through with 'c'. Taken from the measured
+    # scan, so every entry is a (backend, index) pair known to deliver frames -
+    # an index alone would not identify a camera, since the backends disagree.
+    camera_choices = [c.to_device() for c in load_scan() if c.works and not c.blank]
+    if not any(d.spec == device.spec for d in camera_choices):
+        camera_choices.insert(0, device)
+    camera_pos = next(
+        (i for i, d in enumerate(camera_choices) if d.spec == device.spec), 0
+    )
     engine = HandEngine(cfg.hands, mirrored_input=cfg.capture.camera.mirror).start()
     gestures = GestureEngine(_gesture_thresholds(cfg))
     injector = MouseInjector(desktop, armed=False)
@@ -169,6 +176,7 @@ def run_mouse(
     summary = SessionSummary()
     recent_events: list[str] = []
     show_help = True
+    switch_camera = False
     armed_since: float | None = time.perf_counter() if start_armed else None
 
     window = cfg.ui.window_name + " - virtual mouse"
@@ -224,6 +232,40 @@ def run_mouse(
                     injector.arm()
                     pointer.sync_from_system()
                     armed_since = now
+            if switch_camera:
+                switch_camera = False
+                if len(camera_choices) > 1:
+                    camera_pos = (camera_pos + 1) % len(camera_choices)
+                    nxt = camera_choices[camera_pos]
+                    log.info("switching camera to %s (%s)", nxt.name, nxt.spec)
+                    was_armed = injector.armed
+                    # Disarm across the swap: the camera is blind for a moment,
+                    # and a half-seen hand must not be allowed to click.
+                    dispatcher.shutdown()
+                    injector.disarm()
+                    cam.stop()
+                    try:
+                        cam = CameraStream(cfg.capture.camera, device=nxt).start()
+                        device = nxt
+                        recent_events.append(f"camera -> {nxt.name}")
+                    except Exception as exc:
+                        log.error("could not open %s: %s", nxt.spec, exc)
+                        recent_events.append(f"camera {nxt.spec} failed")
+                        camera_pos = (camera_pos - 1) % len(camera_choices)
+                        device = camera_choices[camera_pos]
+                        cam = CameraStream(cfg.capture.camera, device=device).start()
+                    scale_factor = (
+                        cfg.capture.detect_width / float(cam.actual_width)
+                        if 0 < cfg.capture.detect_width < cam.actual_width
+                        else 1.0
+                    )
+                    gestures.reset()
+                    pointer.reset()
+                    if was_armed:
+                        injector.arm()
+                        pointer.sync_from_system()
+                    continue
+
             if center_key.pressed():
                 cx, cy = desktop.primary.center
                 pointer._cursor[:] = (cx, cy)
@@ -309,6 +351,7 @@ def run_mouse(
                 )
 
                 lines = [
+                    f"camera    {device.name[:22]}  ({device.spec})",
                     f"clutch    {'ENGAGED' if gs.clutch_engaged else 'released'}"
                     f"  [{gs.mode}]"
                     f"{'  (FROZEN)' if pstate.frozen else ''}",
@@ -374,6 +417,8 @@ def run_mouse(
                 break
             if key == ord("h"):
                 show_help = not show_help
+            elif key == ord("c"):
+                switch_camera = True
 
             if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
                 break

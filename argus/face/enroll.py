@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..capture.camera import CameraStream
-from ..capture.devices import resolve_device
+from ..capture.picker import select_camera
 from ..config import ArgusConfig
 from ..logsetup import get_logger
 from ..ui.overlay import COLORS, draw_bar, draw_box, draw_panel, draw_text
@@ -81,11 +81,7 @@ def run_enrolment(
         print("  --reset: starting a fresh gallery")
     gallery.model = cfg.face.recognizer.model
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device).start()
 
     window = cfg.ui.window_name + " - enrolment"

@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from ..capture.camera import CameraStream
-from ..capture.devices import resolve_device
+from ..capture.picker import select_camera
 from ..config import ROOT, ArgusConfig
 from ..logsetup import get_logger
 from ..ui.hands import draw_hand
@@ -217,11 +217,7 @@ def run_calibration(
 
     from ..hands.engine import HandEngine
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device).start()
     engine = HandEngine(cfg.hands, mirrored_input=cfg.capture.camera.mirror).start()
 

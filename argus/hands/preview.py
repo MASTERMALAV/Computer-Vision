@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from ..capture.camera import CameraStream
-from ..capture.devices import resolve_device
+from ..capture.picker import select_camera
 from ..config import ROOT, ArgusConfig
 from ..logsetup import get_logger
 from ..metrics import Metrics
@@ -45,11 +45,7 @@ def run_hands_preview(cfg: ArgusConfig, seconds: float = 0.0, renegotiate: bool 
     """Live hand landmarks with per-stage timing on screen."""
     import cv2
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     metrics = Metrics(window=cfg.runtime.metrics_window)
     show_help = True
     show_pinch = True
@@ -150,11 +146,7 @@ def bench_hands(
     """Headless landmark benchmark - the Phase 2 acceptance gate."""
     import cv2
 
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     cam = CameraStream(cfg.capture.camera, device=device, renegotiate=renegotiate).start()
     engine = HandEngine(cfg.hands, mirrored_input=cfg.capture.camera.mirror).start()
 

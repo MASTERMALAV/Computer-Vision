@@ -121,6 +121,21 @@ argus mouse --set security.require_identity=true --set security.operator="Your N
 
 `argus face` shows live detection, recognition and session state.
 
+### Choosing a camera
+
+```bash
+argus cameras --pick
+```
+
+Shows each working camera live and saves your choice. Press **c** during `argus mouse` to
+switch cameras without restarting.
+
+Cameras are identified as `backend:index`, e.g. `msmf:0`, because **an index alone does not
+identify a camera**: Windows' two capture backends enumerate devices independently and can
+disagree. On the development machine DirectShow lists `[Integrated, Brio]` while Media
+Foundation's index 0 *is* the Brio - exactly reversed. `argus cameras --scan` opens every
+combination and reports what each actually delivers.
+
 Other commands: `cameras`, `preview`, `hands`, `screens`, `models`, `config`,
 `bench capture`, `bench hands`, `bench face`.
 
@@ -204,7 +219,13 @@ run at all, since no answer it could produce would matter.
 5. **Face recognition with nothing to decide cost 10 fps.** With gating off and an empty
    gallery it was still hunting for a face every fifth frame, competing with hand tracking
    for the same cores. Work that cannot change a decision is not cheap work.
-6. **A wedged capture backend must not be permanent.** Media Foundation can keep reporting
+6. **An index does not identify a camera.** DirectShow and Media Foundation enumerate
+   devices independently and, on this machine, in *reverse* order. Resolving a name
+   through one and capturing through the other opened the wrong camera while reporting
+   the right name - silently, with no error. Cameras are now identified by
+   `backend:index`, and `auto` chooses from a scan in which every pair was really opened
+   and measured.
+7. **A wedged capture backend must not be permanent.** Media Foundation can keep reporting
    a device as openable while returning no frames, after a process holding it exits
    uncleanly. Since the negotiated backend is cached, that would fail every future run
    identically - so a persistent no-frames failure now falls back to another backend and
@@ -262,7 +283,7 @@ error grows with distance from the origin.
 .venv\Scripts\python.exe -m pytest
 ```
 
-189 tests, no hardware required.
+212 tests, no hardware required.
 
 Gestures and cursor maths are tested against **synthetic hands** with exactly specified
 geometry, so a test can assert something precise - "the same pinch at four times the

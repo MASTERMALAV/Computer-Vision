@@ -18,7 +18,8 @@ from ..logsetup import get_logger
 from ..metrics import Metrics
 from ..ui.overlay import COLORS, draw_panel, draw_text, fps_color
 from .camera import CameraStream
-from .devices import enumerate_devices, resolve_device
+from .devices import enumerate_devices
+from .picker import select_camera
 
 log = get_logger("capture.preview")
 
@@ -199,11 +200,7 @@ def bench_capture(
     renegotiate: bool = False,
 ) -> int:
     """Headless capture benchmark - the Phase 1 acceptance gate."""
-    device = resolve_device(
-        cfg.capture.camera.device,
-        backend=cfg.capture.camera.backend,
-        exclude_ir=cfg.capture.camera.exclude_ir,
-    )
+    device = select_camera(cfg)
     open_start = time.perf_counter()
     cam = CameraStream(cfg.capture.camera, device=device, renegotiate=renegotiate).start()
     startup_s = time.perf_counter() - open_start

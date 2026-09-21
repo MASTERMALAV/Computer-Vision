@@ -69,6 +69,7 @@ cursor does not slide off the thing you were aiming at.
 | **F9** | Arm / disarm. **Nothing touches your cursor until you press this.** |
 | **Esc** (hold ~0.4 s) | Emergency stop. Works from *any* window, even if ARGUS lost focus. |
 | **F10** | Snap the cursor back to the middle of your laptop screen |
+| **c** | Switch to the next camera |
 | **q** | Quit |
 | **h** | Hide the help panel |
 
@@ -126,6 +127,73 @@ The defaults work fine, so a refused calibration leaves you no worse off.
   wrong.
 - Sit **reasonably close**. If the panel says "TOO FAR", your hand is too small in frame.
 - Decent, even lighting. Avoid a bright window directly behind you.
+
+---
+
+## Choosing which camera to use
+
+If ARGUS is using the wrong camera, pick one by eye:
+
+```bash
+argus cameras --pick
+```
+
+It shows each working camera live, one at a time. **N** = next, **ENTER** = choose this
+one, **Q** = cancel. Your choice is saved to `configs/default.yaml`, so every command uses
+it from then on.
+
+You can also switch cameras **while the mouse is running** - press **c**. The HUD shows
+which camera is live.
+
+To see what was found without choosing:
+
+```bash
+argus cameras --scan
+```
+
+### Why a camera is named like `msmf:0`
+
+Windows has two ways of talking to cameras - DirectShow and Media Foundation - and **they
+number the cameras differently**. On this machine:
+
+| | index 0 | index 1 |
+|---|---|---|
+| DirectShow | Integrated Camera | Brio 100 |
+| Media Foundation | **Brio 100** | Integrated Camera |
+
+They are reversed. So "camera 1" is meaningless on its own - it is a different physical
+camera depending on who is asking. A camera is therefore identified by **both**: `msmf:0`
+means "Media Foundation, index 0", which on this machine is the Brio.
+
+This is exactly what was wrong before: ARGUS looked the Brio up in the DirectShow list
+(index 1) and then opened Media Foundation index 1 - the laptop camera. It reported "Brio
+100" the whole time, because the name lookup and the capture were using different
+numbering.
+
+`argus cameras --scan` now opens every combination and reports what each one actually
+delivers, and identifies unnamed ones by comparing what they see against the named ones.
+
+### Pinning a camera by hand
+
+```bash
+argus mouse --camera msmf:0
+```
+
+or in `configs/default.yaml`:
+
+```yaml
+capture:
+  camera:
+    device: msmf:0
+```
+
+`auto` also works and now picks the fastest real camera, preferring an external one.
+
+### If a camera shows black frames
+
+`--scan` reports `(black frames)` when a camera opens fine but produces nothing but black.
+That is almost always a **physical privacy shutter** on the laptop camera. Slide it open,
+or just choose the other camera.
 
 ---
 

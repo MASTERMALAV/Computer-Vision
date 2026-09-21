@@ -167,16 +167,24 @@ class CameraStream:
         # the answer is camera- and driver-specific, and getting it wrong is the
         # difference between 30 fps and 5 fps. Cached after the first run.
         if self.profile is None:
+            config = self.config
+            if dev.backend_locked:
+                # Measure this exact pair rather than searching across backends.
+                config = replace(config, backend=dev.backend)
             self.profile = negotiate(
                 dev.index,
-                dev.name,
-                self.config,
+                dev.spec,
+                config,
                 use_cache=not self._renegotiate,
             )
 
         preferred = self.profile.backend
         candidates = [preferred]
-        if self.config.backend in ("auto", "any"):
+        # Only try other backends when the device was not pinned to one. A
+        # locked device names a (backend, index) pair; switching the backend
+        # under it would open a different physical camera, because the two
+        # enumerations do not agree.
+        if self.config.backend in ("auto", "any") and not dev.backend_locked:
             candidates += [b for b in FALLBACK_BACKENDS if b != preferred]
 
         first_error: BaseException | None = None

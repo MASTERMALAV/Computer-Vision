@@ -2,7 +2,7 @@
 
 Every phase of the system is reachable from one entry point::
 
-    argus cameras            # discover and choose a camera
+    argus cameras --pick     # see each camera live and choose one
     argus preview            # live capture preview + FPS
     argus models pull        # fetch model weights
     argus hands              # live hand landmark preview
@@ -97,6 +97,31 @@ def _load_config(args: argparse.Namespace) -> ArgusConfig:
 # --------------------------------------------------------------------------- #
 def cmd_cameras(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
+
+    if args.pick:
+        from .capture.picker import run_picker
+
+        return run_picker(cfg, write=args.write)
+
+    if args.scan:
+        from .capture.picker import best_candidate, save_scan, scan_cameras
+
+        print()
+        print("  Testing every backend/index pair by actually opening it ...")
+        print()
+        candidates = scan_cameras(cfg)
+        save_scan(candidates)
+        for cand in candidates:
+            print("   " + cand.describe())
+        best = best_candidate(candidates)
+        print()
+        if best is not None:
+            print(f"  Recommended: {best.display_name}  ({best.spec})")
+            print(f"  Use it with:  argus mouse --camera {best.spec}")
+            print("  Or choose visually:  argus cameras --pick")
+        print()
+        return 0
+
     from .capture.devices import enumerate_devices, resolve_device
 
     devices = enumerate_devices(
@@ -353,6 +378,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--probe", action="store_true", help="test each camera for supported resolutions (slow)"
     )
     p_cam.add_argument("--verify", action="store_true", help="open each camera and grab one frame")
+    p_cam.add_argument(
+        "--pick", action="store_true",
+        help="show each camera live and pick one, saving it to the config",
+    )
+    p_cam.add_argument(
+        "--scan", action="store_true",
+        help="test every backend/index pair and report what really works",
+    )
+    p_cam.add_argument(
+        "--write", default=None,
+        help="config file --pick should update (default: configs/default.yaml)",
+    )
     p_cam.add_argument("--json", action="store_true", help="machine-readable output")
     p_cam.set_defaults(func=cmd_cameras)
 

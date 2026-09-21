@@ -20,7 +20,7 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from ..logsetup import get_logger
@@ -72,7 +72,16 @@ def _matches_any(name: str, patterns: Iterable[str]) -> bool:
 
 @dataclass
 class CameraDevice:
-    """A camera OpenCV can open, with whatever metadata we could recover."""
+    """A camera OpenCV can open.
+
+    An index alone does not identify a camera. Each capture backend enumerates
+    devices independently, and they can disagree: on the development machine
+    DirectShow lists [Integrated, Brio] while Media Foundation's index 0 is the
+    Brio. So identity is the (backend, index) *pair*, written "msmf:0".
+
+    ``backend_locked`` marks a device whose backend was chosen deliberately -
+    by the user, or by verifying that exact pair - and must not be swapped.
+    """
 
     index: int
     name: str
@@ -80,13 +89,19 @@ class CameraDevice:
     is_ir: bool = False
     is_virtual: bool = False
     name_is_exact: bool = True  # False when the name came from an unordered source
+    backend_locked: bool = False
     modes: list[tuple[int, int]] = field(default_factory=list)
     probed: bool = False
     working: bool | None = None  # None = not yet verified
 
     @property
+    def spec(self) -> str:
+        """The unambiguous identifier for this camera."""
+        return f"{self.backend}:{self.index}"
+
+    @property
     def label(self) -> str:
-        tags = []
+        tags = [self.spec]
         if self.is_ir:
             tags.append("IR")
         if self.is_virtual:
@@ -129,6 +144,7 @@ class CameraDevice:
 
     def to_dict(self) -> dict:
         return {
+            "spec": self.spec,
             "index": self.index,
             "name": self.name,
             "backend": self.backend,
@@ -342,6 +358,24 @@ def resolve_device(
         devices = enumerate_devices(backend=backend)
 
     spec_str = str(spec).strip()
+
+    # -- explicit backend:index, the unambiguous form ----------------------- #
+    match = re.fullmatch(r"(dshow|msmf|any)\s*:\s*(\d+)", spec_str, flags=re.IGNORECASE)
+    if match:
+        wanted_backend = match.group(1).lower()
+        idx = int(match.group(2))
+        for dev in devices:
+            if dev.index == idx and dev.backend == wanted_backend:
+                return replace(dev, backend_locked=True)
+        # Not enumerated under that backend, but the user named it explicitly -
+        # honour it and let the capture layer report any failure.
+        return CameraDevice(
+            index=idx,
+            name=f"Camera {idx} ({wanted_backend})",
+            backend=wanted_backend,
+            backend_locked=True,
+            name_is_exact=False,
+        )
 
     # -- explicit index ---------------------------------------------------- #
     if re.fullmatch(r"\d+", spec_str):
