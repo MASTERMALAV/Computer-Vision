@@ -25,6 +25,7 @@ Actions can be gated on your face, so the cursor only answers to you.
 | **Camera** | Discovery, measured backend selection, visual picker, live switching |
 | **Calibration** | Fits every gesture threshold to your own hand, and refuses implausible measurements |
 | **Safety** | Disarmed by default, hardware-level panic key, buttons always released, cancellable countdown for destructive actions |
+| **Typing** | Gestures ignored briefly after each keystroke, so a finger over the keyboard cannot twitch the cursor |
 | **Feedback** | Full preview, compact status pill, or no window at all |
 
 Everything runs locally on the CPU. Nothing is uploaded anywhere.
@@ -362,7 +363,7 @@ full landmarks -> gestures -> pointer -> dispatch chain.
 - [x] **Phase 5** Click, right-click, double-click, drag
 - [x] **Phase 6** Face recognition, enrolment, authenticated sessions, identity gating
 - [x] **Phase 7a** Scroll (held middle pinch, with momentum), cancellable confirmation
-- [x] **Phase 7b** Status pill / headless mode, live camera switching
+- [x] **Phase 7b** Status pill / headless mode, live camera switching, typing suppression
 
 `security.require_identity` defaults to `false` so the system is usable before anyone
 enrols; turn it on after `argus enroll`.
@@ -371,8 +372,6 @@ enrols; turn it on after `argus enroll`.
 
 Listed so nothing here is mistaken for a feature that exists:
 
-- [ ] **Typing suppression** - ignore hand gestures briefly after each keystroke, so an
-      index finger resting over the keyboard cannot twitch the cursor mid-sentence
 - [ ] **Action layer** - a rotary "knob" gesture for volume and brightness, and launching
       an application. Turning clockwise raises, anticlockwise lowers
 - [ ] **Practice mode** - Fitts-law target practice that reports throughput in bits/s, so

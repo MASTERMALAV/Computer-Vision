@@ -233,6 +233,24 @@ class ScrollSettings:
 
 
 @dataclass
+class TypingSettings:
+    """Ignore the hand briefly after each keystroke.
+
+    While typing, an index finger resting over the keys looks exactly like the
+    pointing pose. Every touchpad suppresses pointing input after a keystroke
+    for the same reason.
+    """
+
+    enabled: bool = True
+    hold_off_s: float = 0.45
+    suppress_motion: bool = True
+    suppress_clicks: bool = True
+    # A drag or scroll already under way is never interrupted - releasing it
+    # because a key was pressed would drop whatever is being dragged.
+    protect_active_gestures: bool = True
+
+
+@dataclass
 class SmoothingConfig:
     min_cutoff: float = 1.0
     beta: float = 0.02
@@ -258,6 +276,7 @@ class ControlConfig:
     gain: GainCurveConfig = field(default_factory=GainCurveConfig)
     smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
     scroll: ScrollSettings = field(default_factory=ScrollSettings)
+    typing: TypingSettings = field(default_factory=TypingSettings)
     # Which hand may drive the cursor: Left | Right | any
     hand: str = "any"
 
@@ -442,6 +461,13 @@ class ArgusConfig:
             raise ConfigError("control.hand must be Left|Right|any")
         if self.control.scroll.units_per_notch <= 0:
             raise ConfigError("control.scroll.units_per_notch must be positive")
+        if self.control.typing.hold_off_s < 0:
+            raise ConfigError("control.typing.hold_off_s cannot be negative")
+        if self.control.typing.hold_off_s > 3.0:
+            raise ConfigError(
+                "control.typing.hold_off_s above 3 s would make the cursor feel "
+                "broken after typing; 0.3-0.6 is the useful range"
+            )
         if self.gestures.scroll_dwell_s <= 0:
             raise ConfigError("gestures.scroll_dwell_s must be positive")
         gc = self.control.gain

@@ -73,6 +73,7 @@ class PillState:
     fps: float = 0.0
     identity: str = ""
     frozen: bool = False
+    typing: bool = False
     note: str = ""
 
 
@@ -163,7 +164,9 @@ class StatusPill:
         draw_text(canvas, label, (16, 26), 0.62, accent, 2)
 
         if state.armed:
-            if not state.engaged:
+            if state.typing:
+                status, colour = "typing...", COLORS["warn"]
+            elif not state.engaged:
                 status, colour = "parked", COLORS["muted"]
             elif state.mode == "scroll":
                 status, colour = "SCROLL", COLORS["accent"]
@@ -210,7 +213,7 @@ class StatusPill:
 
         now = _time.perf_counter() if now is None else now
         signature = (
-            state.armed, state.engaged, state.mode, state.frozen,
+            state.armed, state.engaged, state.mode, state.frozen, state.typing,
             round(state.pinch, 2), round(state.fps), state.note, state.identity,
         )
         due = (now - self._last_draw) >= self._interval

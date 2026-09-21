@@ -34,6 +34,7 @@ from .control.hotkeys import (
 )
 from .control.injector import MouseInjector
 from .control.pointer import PointerConfig, PointerEngine, ScrollConfig
+from .control.typing import TypingConfig, TypingMonitor
 from .control.screens import get_virtual_desktop
 from .face.pipeline import FacePipeline
 from .gestures.fsm import GestureEngine, GestureThresholds, GestureType
@@ -118,6 +119,7 @@ HELP = [
     "F10      re-centre cursor on primary",
     "c        switch camera",
     "pinch    index=click/drag  middle=right/scroll",
+    "typing   hand ignored while you type",
     "q        quit    h  hide this panel",
 ]
 
@@ -162,6 +164,15 @@ def run_mouse(
     pointer = PointerEngine(injector, _pointer_config(cfg))
     dispatcher = ActionDispatcher(injector, cfg.security)
     confirmer = Confirmer(duration_s=cfg.security.confirm_countdown_s)
+    typing = TypingMonitor(
+        TypingConfig(
+            enabled=cfg.control.typing.enabled,
+            hold_off_s=cfg.control.typing.hold_off_s,
+            suppress_motion=cfg.control.typing.suppress_motion,
+            suppress_clicks=cfg.control.typing.suppress_clicks,
+            protect_active_gestures=cfg.control.typing.protect_active_gestures,
+        )
+    )
 
     face: FacePipeline | None = None
     if cfg.face.enabled:
@@ -362,10 +373,23 @@ def run_mouse(
                 for session_event in face.drain_events():
                     recent_events.append(str(session_event))
 
+            # A gesture already under way is never suppressed: releasing a
+            # drag because a key was pressed would drop whatever is held.
+            with metrics.timer("stage.typing"):
+                typing.update(now)
+                active_gesture = (
+                    gestures.state.dragging or gestures.state.mode == "scroll"
+                )
+                block_motion = typing.should_block_motion(now, active_gesture)
+                block_actions = typing.should_block_actions(now, active_gesture)
+                typing.note_frame(now)
+
             with metrics.timer("stage.gestures"):
                 events = gestures.update(hand, now)
             with metrics.timer("stage.pointer"):
-                pstate = pointer.update(hand, gestures.state, events, now)
+                pstate = pointer.update(
+                    hand, gestures.state, events, now, suppressed=block_motion
+                )
             # A pending destructive action is cancelled by any deliberate
             # gesture, because cancelling must always be easier than confirming.
             if events and confirmer.is_counting:
@@ -375,7 +399,12 @@ def run_mouse(
                 recent_events.append(f"CONFIRMED {fired.action}")
 
             with metrics.timer("stage.dispatch"):
-                records = dispatcher.dispatch(events, now)
+                if block_actions:
+                    records = []
+                    if events:
+                        recent_events.append("typing - action held")
+                else:
+                    records = dispatcher.dispatch(events, now)
 
             for ev in events:
                 if ev.type not in (GestureType.PINCH_APPROACH, GestureType.PINCH_ABORT):
@@ -432,6 +461,10 @@ def run_mouse(
                     ]
                     if gs.suppressed_by_motion:
                         lines.append("moving too fast - gestures gated")
+                    if typing.is_suppressing(now):
+                        lines.append(
+                            f"TYPING - hand ignored for {typing.remaining(now):.2f}s"
+                        )
                     if face is not None:
                         identity = dispatcher.identity
                         mark = "OK" if identity.authenticated else "NO"
@@ -490,6 +523,7 @@ def run_mouse(
                             pinch_close=cfg.gestures.pinch_close,
                             fps=metrics.fps,
                             frozen=pstate.frozen,
+                            typing=typing.is_suppressing(now),
                             identity=(
                                 dispatcher.identity.name
                                 if cfg.security.require_identity
@@ -535,6 +569,7 @@ def run_mouse(
     print(f"  actions        : {dispatcher.stats.as_dict()}")
     print(f"  injector       : {injector.stats.as_dict()}")
     print(f"  cursor travel  : {summary.cursor_px:.0f} px")
+    print(f"  typing         : {typing.stats()}")
     if face is not None:
         print(f"  identity       : {face.stats()}")
     print(f"  armed for      : {summary.armed_seconds:.1f} s")

@@ -231,6 +231,7 @@ class PointerState:
     monitor: int = 0
     scroll_notches: int = 0
     coasting: bool = False
+    suppressed: bool = False
 
 
 class PointerEngine:
@@ -319,8 +320,16 @@ class PointerEngine:
         gesture_state: GestureState,
         events: list[GestureEvent],
         now: float,
+        suppressed: bool = False,
     ) -> PointerState:
-        """Advance the cursor by one frame and return the resulting state."""
+        """Advance the cursor by one frame and return the resulting state.
+
+        ``suppressed`` holds the cursor still without losing track of where the
+        hand is - the same mechanism as the click freeze. Skipping the update
+        entirely would leave a stale anchor, and the first frame after
+        suppression lifted would compute its displacement against a position
+        from seconds ago and fling the cursor.
+        """
         self._handle_events(events, now)
 
         # A freeze must expire on its own: if a pinch is begun and simply held
@@ -329,7 +338,8 @@ class PointerEngine:
             self._unfreeze()
 
         self.state.engaged = gesture_state.clutch_engaged
-        self.state.frozen = self._frozen
+        self.state.frozen = self._frozen or suppressed
+        self.state.suppressed = suppressed
         self.state.hand_speed = gesture_state.hand_speed
         self.state.moved_px = 0.0
 
@@ -399,7 +409,7 @@ class PointerEngine:
         gain = self.config.gain.gain(speed)
         self.state.gain = gain
 
-        if self._frozen:
+        if self._frozen or suppressed:
             # Position is still tracked above so that motion during the freeze
             # is discarded rather than accumulated and released in a lump.
             return self.state

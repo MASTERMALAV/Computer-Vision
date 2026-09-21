@@ -73,6 +73,11 @@ Tap = a click. Hold = a sustained action. That is the whole system.
   grip is what frees it for the other.
 - **Move slowly for precision, quickly to cover distance.** The cursor speeds up when your
   hand does, like a normal mouse pointer.
+- **While you type, your hand is ignored.** An index finger resting over the keyboard
+  looks exactly like the pointing pose, so gestures are suppressed for about half a second
+  after each keystroke - the same thing a laptop touchpad does. Holding Ctrl or Shift does
+  *not* count as typing, so Ctrl-click and Shift-click still work, and a drag or scroll
+  already in progress is never interrupted.
 - **Your distance from the camera does not matter.** Every measurement is scaled by the
   size of your own hand, so a pinch means the same thing near or far.
 
