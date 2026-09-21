@@ -282,6 +282,46 @@ class ControlConfig:
 
 
 # --------------------------------------------------------------------------- #
+# Action layer
+# --------------------------------------------------------------------------- #
+@dataclass
+class RotationSettings:
+    degrees_per_step: float = 9.0
+    dead_zone_deg: float = 0.8
+    max_steps_per_frame: int = 3
+    # The preview is mirrored, which reverses apparent rotation. With this on,
+    # turning clockwise *as you see it* raises the value.
+    invert: bool = True
+
+
+@dataclass
+class ActionsConfig:
+    """Poses that act on the machine rather than on the cursor.
+
+    The two pinches already carry a tap and a hold each, which is as much as
+    two fingers can say unambiguously. So these use whole-hand poses, and a
+    turn of the wrist for anything continuous - a knob has no travel limit,
+    which is exactly what hand translation lacks.
+
+        open palm  + turn   volume
+        V sign     + turn   brightness
+        thumbs up  + hold   launch an app
+    """
+
+    enabled: bool = True
+    # Where to find the app to launch. Leave empty and `argus actions --find
+    # whatsapp` will fill it in; Store app ids differ per machine, so one
+    # hardcoded here would only ever be right on the machine it came from.
+    launch_target: str = ""
+    launch_hold_s: float = 0.90
+    launch_cooldown_s: float = 2.50
+    # Percent of brightness per step of the knob.
+    brightness_percent: int = 5
+    thumb_out: float = 1.05
+    rotation: RotationSettings = field(default_factory=RotationSettings)
+
+
+# --------------------------------------------------------------------------- #
 # Security
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -357,6 +397,7 @@ class ArgusConfig:
     hands: HandsConfig = field(default_factory=HandsConfig)
     gestures: GestureConfig = field(default_factory=GestureConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
+    actions: ActionsConfig = field(default_factory=ActionsConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     ui: UIConfig = field(default_factory=UIConfig)
@@ -461,6 +502,12 @@ class ArgusConfig:
             raise ConfigError("control.hand must be Left|Right|any")
         if self.control.scroll.units_per_notch <= 0:
             raise ConfigError("control.scroll.units_per_notch must be positive")
+        if self.actions.rotation.degrees_per_step <= 0:
+            raise ConfigError("actions.rotation.degrees_per_step must be positive")
+        if not 1 <= self.actions.brightness_percent <= 50:
+            raise ConfigError("actions.brightness_percent must be between 1 and 50")
+        if self.actions.launch_hold_s <= 0:
+            raise ConfigError("actions.launch_hold_s must be positive")
         if self.control.typing.hold_off_s < 0:
             raise ConfigError("control.typing.hold_off_s cannot be negative")
         if self.control.typing.hold_off_s > 3.0:

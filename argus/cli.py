@@ -10,6 +10,7 @@ Every phase of the system is reachable from one entry point::
     argus calibrate          # fit gesture thresholds to your hand
     argus enroll <name>      # enrol a face for identity gating
     argus face               # live face recognition preview
+    argus actions            # volume / brightness / launch gestures
     argus screens            # display layout + DPI
     argus bench capture      # headless throughput benchmark
     argus config             # show the effective configuration
@@ -241,6 +242,89 @@ def cmd_face_preview(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# actions
+# --------------------------------------------------------------------------- #
+def cmd_actions(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .control.system import BrightnessControl, find_store_app, launch
+
+    if args.find:
+        target = find_store_app(args.find)
+        if not target:
+            print()
+            print(f"  No installed app matched {args.find!r}.")
+            print("  List what is available with:  Get-StartApps    (in PowerShell)")
+            print()
+            return 1
+        print()
+        print(f"  Found: {target}")
+        if args.write:
+            import re
+
+            path = ROOT / "configs" / "default.yaml"
+            text = path.read_text(encoding="utf-8")
+            # Single quotes: YAML performs no escape processing inside them,
+            # which matters because a Store app id contains a backslash and
+            # double quotes would make "\5" an invalid escape and break the
+            # whole file.
+            quoted = "'" + target.replace("'", "''") + "'"
+            if "launch_target:" in text:
+                text = re.sub(
+                    r"^(\s*launch_target:\s*).*$",
+                    lambda m: m.group(1) + quoted,
+                    text,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+            else:
+                text = text.rstrip("\n") + "\n\nactions:\n  launch_target: " + quoted + "\n"
+            path.write_text(text, encoding="utf-8")
+            print(f"  Saved to {path}")
+        else:
+            print("  Add it with --write, or set actions.launch_target yourself.")
+        print()
+        return 0
+
+    if args.test_launch:
+        target = cfg.actions.launch_target
+        if not target:
+            print()
+            print("  No actions.launch_target configured. Set one with:")
+            print("    argus actions --find whatsapp --write")
+            print()
+            return 1
+        print()
+        print(f"  Launching {target} ...")
+        ok = launch(target)
+        print("  OK" if ok else "  FAILED")
+        print()
+        return 0 if ok else 1
+
+    print()
+    print("  Action gestures")
+    print("    open palm  + turn wrist   volume")
+    print("    V sign     + turn wrist   brightness")
+    print(f"    thumbs up  + hold {cfg.actions.launch_hold_s:.1f}s     launch an app")
+    print()
+    print(f"  enabled        : {cfg.actions.enabled}")
+    print(f"  launch target  : {cfg.actions.launch_target or '(not set)'}")
+    print(f"  per knob step  : volume 1 notch, brightness {cfg.actions.brightness_percent}%")
+    print(f"  degrees / step : {cfg.actions.rotation.degrees_per_step}")
+
+    b = BrightnessControl().start()
+    if b.available:
+        print(f"  brightness     : available, currently {b.level}%")
+    else:
+        print("  brightness     : NOT available (external monitors need DDC/CI)")
+    b.stop()
+    print()
+    print("  Find an app:   argus actions --find whatsapp --write")
+    print("  Test it:       argus actions --test-launch")
+    print()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # calibrate
 # --------------------------------------------------------------------------- #
 def cmd_calibrate(args: argparse.Namespace) -> int:
@@ -452,6 +536,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_face)
     p_face.add_argument("--seconds", type=float, default=0.0, help="auto-exit after N seconds")
     p_face.set_defaults(func=cmd_face_preview)
+
+    p_act = sub.add_parser("actions", help="volume / brightness / launch gestures")
+    _add_common(p_act)
+    p_act.add_argument("--find", metavar="NAME", default=None,
+                       help="find an installed app by name, e.g. --find whatsapp")
+    p_act.add_argument("--write", action="store_true",
+                       help="save the found app as the launch target")
+    p_act.add_argument("--test-launch", action="store_true",
+                       help="launch the configured app now")
+    p_act.set_defaults(func=cmd_actions)
 
     p_cal = sub.add_parser("calibrate", help="fit gesture thresholds to your hand")
     _add_common(p_cal)

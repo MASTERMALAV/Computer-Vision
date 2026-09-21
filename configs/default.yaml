@@ -108,3 +108,6 @@ security:
   reverify_interval_s: 15.0
   fresh_match_within_s: 5.0
   confirm_countdown_s: 5.0
+
+actions:
+  launch_target: 'shell:AppsFolder\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App'

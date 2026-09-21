@@ -35,6 +35,9 @@ cursor does not slide off the thing you were aiming at.
 | **Thumb taps index twice quickly** | Double click |
 | **Thumb holds index** (~0.35 s) then move | Drag - release the pinch to drop |
 | **Thumb holds middle** (~0.30 s) then move up/down | Scroll - release to stop |
+| **Open your whole hand**, then turn your wrist | **Volume** - clockwise up, anticlockwise down |
+| **Two fingers up (a V)**, then turn your wrist | **Brightness** - clockwise up, anticlockwise down |
+| **Thumbs up**, held ~0.9 s | **Launch WhatsApp** |
 
 ### Which fingers, exactly
 
@@ -242,15 +245,86 @@ or just choose the other camera.
 
 ---
 
+---
+
+## Volume, brightness and launching an app
+
+These are **poses**, not pinches. Your thumb and two fingers already carry four actions
+between them, which is about as much as two fingers can say without getting confused, so
+anything else uses the shape of the whole hand.
+
+### Turning a knob
+
+| Pose | Controls |
+|---|---|
+| **Open palm** - all fingers spread | Volume |
+| **V sign** - index and middle up, ring and pinky curled | Brightness |
+
+Make the pose, then **turn your wrist as if turning a dial**. Clockwise raises, anticlockwise
+lowers. Keep turning as far as you like - unlike sliding your hand, a turn never runs out of
+room, which is exactly why a knob is the right shape for a volume control.
+
+The cursor holds still while you are turning, so you never lose your place.
+
+About 9 degrees of turn is one step. To change that:
+
+```bash
+.\argus mouse --set actions.rotation.degrees_per_step=6
+```
+
+If the direction feels backwards, flip it:
+
+```bash
+.\argus mouse --set actions.rotation.invert=false
+```
+
+**Brightness works on the laptop screen only.** External monitors need DDC/CI, which most
+of them implement badly or not at all, so ARGUS says it is unavailable rather than
+pretending. Check with `.\argus actions`.
+
+### Launching an app
+
+Hold a **thumbs up** for about a second. The hold is deliberate - a thumbs-up meant for a
+person in the room should not start an application - and it fires once, not repeatedly,
+however long you keep holding it.
+
+First tell it what to launch:
+
+```bash
+.\argus actions --find whatsapp --write
+```
+
+That finds the app on *your* machine and saves it. Store app IDs are different on every
+machine, so there is nothing sensible to hardcode. Check it works:
+
+```bash
+.\argus actions --test-launch
+```
+
+Any app works, not just WhatsApp - `--find spotify`, `--find notepad`, and so on.
+
+### Seeing what is set up
+
+```bash
+.\argus actions
+```
+
+Shows the gestures, whether brightness is available on your display, and what will be
+launched.
+
+### The safety rules are the same as for clicking
+
+Changing the volume is not as serious as a click, but it is still an effect on your
+machine, so it obeys the same three rules: the system must be **armed** (F9), the operator
+must be **recognised** if identity gating is on, and **nothing fires while you are typing**.
+
+---
+
 ## Not built yet
 
 So you are not hunting for controls that do not exist, these are **planned but not
 implemented**:
 
-- **Volume and brightness by turning a knob** - rotate your hand clockwise to raise,
-  anticlockwise to lower
-- **Launching an app** with a gesture
-- **Typing suppression** - ignoring gestures for a moment after each keystroke
 - **Practice mode** - target practice that measures how good the pointing actually is
 - **Jumping the cursor between monitors**
 - **`argus doctor`** - one command that checks everything is healthy

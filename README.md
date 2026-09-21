@@ -25,6 +25,8 @@ Actions can be gated on your face, so the cursor only answers to you.
 | **Camera** | Discovery, measured backend selection, visual picker, live switching |
 | **Calibration** | Fits every gesture threshold to your own hand, and refuses implausible measurements |
 | **Safety** | Disarmed by default, hardware-level panic key, buttons always released, cancellable countdown for destructive actions |
+| **Volume / brightness** | Make a pose and turn your wrist like a dial. A turn has no travel limit, which sliding a hand does |
+| **Launch an app** | Thumbs up, held |
 | **Typing** | Gestures ignored briefly after each keystroke, so a finger over the keyboard cannot twitch the cursor |
 | **Feedback** | Full preview, compact status pill, or no window at all |
 
@@ -69,6 +71,11 @@ range, which is a few hundred pixels of document, against a wheel that has no li
 movement is boosted with speed and a flick coasts after release, decoupling distance
 scrolled from distance moved. A slow release stops dead, because that is when you are
 positioning carefully.
+
+**Continuous things are turned, not slid.** Volume and brightness are adjusted by making
+a pose and rotating the wrist. Rotation has no travel limit - you can keep turning - which
+is precisely the property hand *translation* lacks, and the reason scrolling needed
+momentum to paper over. A knob needs no such trick.
 
 **Gain rises with speed.** A single fixed gain cannot both hit a 16 px close button and
 cross a 4480 px dual-monitor desktop. Slow movements get precision; fast ones cover ground,
@@ -364,6 +371,7 @@ full landmarks -> gestures -> pointer -> dispatch chain.
 - [x] **Phase 6** Face recognition, enrolment, authenticated sessions, identity gating
 - [x] **Phase 7a** Scroll (held middle pinch, with momentum), cancellable confirmation
 - [x] **Phase 7b** Status pill / headless mode, live camera switching, typing suppression
+- [x] **Phase 7c** Action layer: rotary volume and brightness, app launching
 
 `security.require_identity` defaults to `false` so the system is usable before anyone
 enrols; turn it on after `argus enroll`.
@@ -372,8 +380,6 @@ enrols; turn it on after `argus enroll`.
 
 Listed so nothing here is mistaken for a feature that exists:
 
-- [ ] **Action layer** - a rotary "knob" gesture for volume and brightness, and launching
-      an application. Turning clockwise raises, anticlockwise lowers
 - [ ] **Practice mode** - Fitts-law target practice that reports throughput in bits/s, so
       pointer gain can be tuned from data rather than from feel
 - [ ] **Monitor jumping** - a single action to throw the cursor across a 4480 px desktop

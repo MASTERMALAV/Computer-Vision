@@ -38,6 +38,15 @@ from enum import Enum
 
 from ..hands.landmarks import Hand
 from ..logsetup import get_logger
+from .poses import (
+    Pose,
+    PoseThresholds,
+    PoseTracker,
+    RotationConfig,
+    RotationTracker,
+    classify,
+    hand_angle,
+)
 
 log = get_logger("gestures")
 
@@ -57,6 +66,12 @@ class GestureType(str, Enum):
     DRAG_END = "drag_end"
     SCROLL_START = "scroll_start"
     SCROLL_END = "scroll_end"
+    # The action layer: a pose selects what is being adjusted, and turning the
+    # hand adjusts it. See argus/gestures/poses.py.
+    KNOB_START = "knob_start"
+    KNOB_STEP = "knob_step"
+    KNOB_END = "knob_end"
+    LAUNCH = "launch"
     HAND_LOST = "hand_lost"
 
 
@@ -291,6 +306,15 @@ class GestureThresholds:
     # scroll and waiting to find out feels sluggish.
     scroll_dwell_s: float = 0.30
 
+    # ---- action layer ---- #
+    actions_enabled: bool = True
+    # How long the thumbs-up must be held before the app launches. Long enough
+    # that a thumbs-up meant for a person in the room does not start something.
+    launch_hold_s: float = 0.90
+    launch_cooldown_s: float = 2.50
+    thumb_out: float = 1.05
+    rotation: RotationConfig = field(default_factory=RotationConfig)
+
 
 @dataclass
 class GestureState:
@@ -304,8 +328,11 @@ class GestureState:
     hand_present: bool = False
     extensions: dict[str, float] = field(default_factory=dict)
     suppressed_by_motion: bool = False
-    # "point" while one finger is out, "scroll" while two are.
+    # point | scroll | volume | brightness. Anything other than "point" means
+    # the cursor is deliberately held still.
     mode: str = "point"
+    pose: str = "unknown"
+    knob_value: int = 0  # signed steps emitted this frame
 
 
 
@@ -317,6 +344,19 @@ class GestureEngine:
         self.state = GestureState()
 
         self.clutch_debounce = Debouncer(self.t.clutch_debounce_frames)
+        self.poses = PoseTracker(window=5, required=4)
+        self.rotation = RotationTracker(self.t.rotation)
+        self._pose_thresholds = PoseThresholds(
+            extended=self.t.finger_extended,
+            curled=self.t.finger_curled,
+            thumb_out=self.t.thumb_out,
+        )
+        # Which pose adjusts what. Poses rather than more pinches, because the
+        # two pinches already carry a tap and a hold each.
+        self._knobs = {Pose.OPEN_PALM: "volume", Pose.V_SIGN: "brightness"}
+        self._active_knob = ""
+        self._launched_at = -1e9
+        self._launch_armed = True
         self.left_click = PinchDetector(
             "index",
             close_at=self.t.pinch_close,
@@ -404,8 +444,17 @@ class GestureEngine:
             if self.state.hand_present:
                 events.append(GestureEvent(GestureType.HAND_LOST, now))
             self.state.hand_present = False
+            if self._active_knob:
+                events.append(
+                    GestureEvent(GestureType.KNOB_END, now, detail=self._active_knob)
+                )
+                self._active_knob = ""
             self.state.dragging = False
             self.state.mode = "point"
+            self.state.pose = "unknown"
+            self.poses.reset()
+            self.rotation.reset()
+            self._launch_armed = True
             self.clutch_debounce.reset(False)
             self.left_click.reset()
             self.right_click.reset()
@@ -446,6 +495,15 @@ class GestureEngine:
                         GestureEvent(GestureType.SCROLL_END, now, label, detail="clutch released")
                     )
 
+        # ---- action layer ------------------------------------------------ #
+        # Evaluated before the pinches, because an action pose takes the hand
+        # out of cursor duty entirely and must win any ambiguity.
+        events += self._update_actions(hand, now, label)
+        if self._active_knob:
+            self.state.dragging = self.left_click.dragging
+            self.state.mode = self._active_knob
+            return events
+
         # ---- pinches ----------------------------------------------------- #
         # Landmarks are least trustworthy while the hand is moving fast, and a
         # fast-moving hand is not trying to click. Gate new gestures on that,
@@ -478,6 +536,60 @@ class GestureEngine:
         self.state.mode = "scroll" if self.right_click.dragging else "point"
         return events
 
+    def _update_actions(self, hand: Hand, now: float, label: str) -> list[GestureEvent]:
+        """Poses and rotation: volume, brightness, and launching an app."""
+        events: list[GestureEvent] = []
+        if not self.t.actions_enabled:
+            return events
+
+        pose = self.poses.update(classify(hand, self._pose_thresholds), now)
+        self.state.pose = pose.value
+        self.state.knob_value = 0
+
+        # A pinch already in progress owns the hand; a pose must not hijack it.
+        busy = self.left_click.dragging or self.right_click.dragging
+        knob = "" if busy else self._knobs.get(pose, "")
+
+        if knob != self._active_knob:
+            if self._active_knob:
+                events.append(
+                    GestureEvent(GestureType.KNOB_END, now, label, detail=self._active_knob)
+                )
+            self.rotation.reset()
+            self._active_knob = knob
+            if knob:
+                events.append(GestureEvent(GestureType.KNOB_START, now, label, detail=knob))
+
+        if self._active_knob:
+            steps = self.rotation.update(hand_angle(hand), active=True)
+            if steps:
+                self.state.knob_value = steps
+                events.append(
+                    GestureEvent(
+                        GestureType.KNOB_STEP, now, label,
+                        value=float(steps), detail=self._active_knob,
+                    )
+                )
+            return events
+
+        # ---- launch ---- #
+        # Requires a deliberate hold, and re-arms only once the pose is
+        # released, so holding a thumbs-up cannot launch repeatedly.
+        if pose is Pose.THUMBS_UP:
+            held = self.poses.held_for(now)
+            if (
+                self._launch_armed
+                and held >= self.t.launch_hold_s
+                and (now - self._launched_at) >= self.t.launch_cooldown_s
+            ):
+                self._launch_armed = False
+                self._launched_at = now
+                events.append(GestureEvent(GestureType.LAUNCH, now, label, value=held))
+        else:
+            self._launch_armed = True
+
+        return events
+
     @staticmethod
     def _relabel_middle(event: GestureEvent) -> GestureEvent:
         """Give the middle-finger detector's generic events their meaning.
@@ -504,6 +616,10 @@ class GestureEngine:
         self.clutch_debounce.reset(False)
         self.left_click.reset()
         self.right_click.reset()
+        self.poses.reset()
+        self.rotation.reset()
+        self._active_knob = ""
+        self._launch_armed = True
         self._prev_palm = None
         self._prev_time = None
         self._speed_window.clear()

@@ -345,6 +345,8 @@ class PointerEngine:
 
         self.state.scroll_notches = 0
         scrolling = gesture_state.mode == "scroll"
+        # volume / brightness knobs also take the hand out of cursor duty.
+        acting = gesture_state.mode not in ("point", "scroll")
 
         # The scroll engine is driven every frame, not only while the gesture is
         # held, because a flick keeps emitting for a moment after release.
@@ -367,7 +369,7 @@ class PointerEngine:
         # Scrolling drives the wheel instead of the cursor. The pointer is
         # deliberately left where it is: scrolling a window should not also move
         # the pointer out of it.
-        if scrolling:
+        if scrolling or acting:
             self._prev_source = None
             self._prev_time = None
             return self.state

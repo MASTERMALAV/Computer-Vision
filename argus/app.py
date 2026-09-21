@@ -34,10 +34,12 @@ from .control.hotkeys import (
 )
 from .control.injector import MouseInjector
 from .control.pointer import PointerConfig, PointerEngine, ScrollConfig
+from .control.system import SystemActions
 from .control.typing import TypingConfig, TypingMonitor
 from .control.screens import get_virtual_desktop
 from .face.pipeline import FacePipeline
 from .gestures.fsm import GestureEngine, GestureThresholds, GestureType
+from .gestures.poses import RotationConfig
 from .hands.engine import HandEngine
 from .logsetup import get_logger
 from .metrics import Metrics
@@ -100,6 +102,16 @@ def _gesture_thresholds(cfg: ArgusConfig) -> GestureThresholds:
         double_click_s=g.double_click_s,
         motion_gate_speed=g.motion_gate_speed,
         scroll_dwell_s=g.scroll_dwell_s,
+        actions_enabled=cfg.actions.enabled,
+        launch_hold_s=cfg.actions.launch_hold_s,
+        launch_cooldown_s=cfg.actions.launch_cooldown_s,
+        thumb_out=cfg.actions.thumb_out,
+        rotation=RotationConfig(
+            degrees_per_step=cfg.actions.rotation.degrees_per_step,
+            dead_zone_deg=cfg.actions.rotation.dead_zone_deg,
+            max_steps_per_frame=cfg.actions.rotation.max_steps_per_frame,
+            invert=cfg.actions.rotation.invert,
+        ),
     )
 
 
@@ -133,6 +145,54 @@ def _select_hand(result, wanted: str):
     return result.primary
 
 
+
+def _run_system_actions(
+    events,
+    system,
+    cfg,
+    injector,
+    dispatcher,
+    now: float,
+    blocked: bool,
+    recent_events: list,
+) -> None:
+    """Apply knob steps and launches, under the same guards as a click.
+
+    Changing the volume is not as destructive as a click, but it is still an
+    effect on the machine, so it obeys the same three rules: the system must be
+    armed, the operator must be authenticated when gating is on, and nothing
+    fires while the keyboard is in use.
+    """
+    for event in events:
+        if event.type not in (GestureType.KNOB_STEP, GestureType.LAUNCH):
+            continue
+        if not injector.armed:
+            continue
+        if blocked:
+            recent_events.append("typing - action held")
+            continue
+        if cfg.security.require_identity and not dispatcher.identity.authenticated:
+            recent_events.append("blocked: no operator")
+            continue
+
+        if event.type is GestureType.KNOB_STEP:
+            steps = int(event.value)
+            if event.detail == "volume":
+                system.volume_step(steps)
+                recent_events.append(f"volume {steps:+d}")
+            elif event.detail == "brightness":
+                level = system.brightness_step(
+                    1 if steps > 0 else -1, cfg.actions.brightness_percent
+                )
+                recent_events.append(
+                    f"brightness {level}%" if level is not None
+                    else "brightness unavailable"
+                )
+        elif event.type is GestureType.LAUNCH:
+            recent_events.append(
+                "launched" if system.launch_app(now) else "launch failed"
+            )
+
 def run_mouse(
     cfg: ArgusConfig,
     seconds: float = 0.0,
@@ -164,6 +224,10 @@ def run_mouse(
     pointer = PointerEngine(injector, _pointer_config(cfg))
     dispatcher = ActionDispatcher(injector, cfg.security)
     confirmer = Confirmer(duration_s=cfg.security.confirm_countdown_s)
+    system = SystemActions(
+        launch_target=cfg.actions.launch_target,
+        cooldown_s=cfg.actions.launch_cooldown_s,
+    ).start() if cfg.actions.enabled else None
     typing = TypingMonitor(
         TypingConfig(
             enabled=cfg.control.typing.enabled,
@@ -398,6 +462,15 @@ def run_mouse(
             if fired is not None:
                 recent_events.append(f"CONFIRMED {fired.action}")
 
+            # System actions run on the same interlock as the cursor: armed,
+            # identity-gated, and never while typing.
+            if system is not None and events:
+                with metrics.timer("stage.actions"):
+                    _run_system_actions(
+                        events, system, cfg, injector, dispatcher,
+                        now, block_actions, recent_events,
+                    )
+
             with metrics.timer("stage.dispatch"):
                 if block_actions:
                     records = []
@@ -545,6 +618,8 @@ def run_mouse(
                 break
     finally:
         # Order matters: release buttons before tearing anything else down.
+        if system is not None:
+            system.close()
         confirmer.cancel("shutting down")
         dispatcher.shutdown()
         injector.disarm()
@@ -570,6 +645,8 @@ def run_mouse(
     print(f"  injector       : {injector.stats.as_dict()}")
     print(f"  cursor travel  : {summary.cursor_px:.0f} px")
     print(f"  typing         : {typing.stats()}")
+    if system is not None:
+        print(f"  actions        : {system.describe()}")
     if face is not None:
         print(f"  identity       : {face.stats()}")
     print(f"  armed for      : {summary.armed_seconds:.1f} s")
