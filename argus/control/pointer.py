@@ -345,8 +345,10 @@ class PointerEngine:
 
         self.state.scroll_notches = 0
         scrolling = gesture_state.mode == "scroll"
-        # volume / brightness knobs also take the hand out of cursor duty.
-        acting = gesture_state.mode not in ("point", "scroll")
+        # Knobs take the hand out of cursor duty - and so does a hand that is
+        # merely on its way into one, so that reaching for the volume does not
+        # drag the pointer across the screen first.
+        acting = gesture_state.mode not in ("point", "scroll") or gesture_state.action_pending
 
         # The scroll engine is driven every frame, not only while the gesture is
         # held, because a flick keeps emitting for a moment after release.
@@ -435,6 +437,22 @@ class PointerEngine:
         self.state.position = (float(self._cursor[0]), float(self._cursor[1]))
         self.state.monitor = self.injector.desktop.monitor_at(*self._cursor).index
         return self.state
+
+    def jump_to(self, x: float, y: float) -> None:
+        """Teleport the cursor, without the next frame treating it as movement.
+
+        The anchor is cleared as well as the position. Leaving it behind would
+        make the following frame compute its displacement against where the
+        hand was before the jump, undoing it immediately.
+        """
+        x, y = self.injector.desktop.clamp(x, y)
+        self._cursor[:] = (x, y)
+        self.state.position = (float(x), float(y))
+        self.state.monitor = self.injector.desktop.monitor_at(x, y).index
+        self._prev_source = None
+        self._prev_time = None
+        self._filter.reset()
+        self.injector.move_to(x, y)
 
     def reset(self) -> None:
         self._filter.reset()

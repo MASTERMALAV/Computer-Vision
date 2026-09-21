@@ -28,6 +28,8 @@ Actions can be gated on your face, so the cursor only answers to you.
 | **Volume / brightness** | Make a pose and turn your wrist like a dial. A turn has no travel limit, which sliding a hand does |
 | **Launch an app** | Thumbs up, held |
 | **Typing** | Gestures ignored briefly after each keystroke, so a finger over the keyboard cannot twitch the cursor |
+| **Monitors** | F10 jumps the cursor to the next display, keeping its relative position |
+| **Measurement** | `argus practice` reports pointer throughput in bits/s; `argus doctor` checks everything |
 | **Feedback** | Full preview, compact status pill, or no window at all |
 
 Everything runs locally on the CPU. Nothing is uploaded anywhere.
@@ -191,7 +193,31 @@ disagree. On the development machine DirectShow lists `[Integrated, Brio]` while
 Foundation's index 0 *is* the Brio - exactly reversed. `argus cameras --scan` opens every
 combination and reports what each actually delivers.
 
-Other commands: `cameras`, `preview`, `hands`, `screens`, `models`, `config`,
+### Check everything is healthy
+
+```bash
+.\argus doctor --live
+```
+
+Checks the environment, models, camera, displays, input injection, gesture thresholds,
+actions and identity - and says what to do about anything it does not like. It judges
+rather than just reports: a calibration can be entirely *valid* and still be fragile,
+because a threshold sits a hundredth away from what your hand produces. That reads as
+"works, mostly", which is the hardest kind of fault to chase, so the margins are measured
+and printed.
+
+### Measure the pointer instead of guessing
+
+```bash
+.\argus practice
+```
+
+The standard ISO 9241-411 tapping task, reporting **throughput in bits per second**. It
+watches the operating-system cursor rather than the gesture pipeline, so the same command
+measures a physical mouse - which makes the two directly comparable on this machine, with
+this person. It ends by suggesting a concrete gain change.
+
+Other commands: `cameras`, `preview`, `hands`, `screens`, `models`, `config`, `actions`,
 `bench capture`, `bench hands`, `bench face`.
 
 ---
@@ -372,6 +398,7 @@ full landmarks -> gestures -> pointer -> dispatch chain.
 - [x] **Phase 7a** Scroll (held middle pinch, with momentum), cancellable confirmation
 - [x] **Phase 7b** Status pill / headless mode, live camera switching, typing suppression
 - [x] **Phase 7c** Action layer: rotary volume and brightness, app launching
+- [x] **Phase 7d** Fitts practice harness, monitor jumping, health check
 
 `security.require_identity` defaults to `false` so the system is usable before anyone
 enrols; turn it on after `argus enroll`.
@@ -380,10 +407,6 @@ enrols; turn it on after `argus enroll`.
 
 Listed so nothing here is mistaken for a feature that exists:
 
-- [ ] **Practice mode** - Fitts-law target practice that reports throughput in bits/s, so
-      pointer gain can be tuned from data rather than from feel
-- [ ] **Monitor jumping** - a single action to throw the cursor across a 4480 px desktop
-- [ ] **`argus doctor`** - one health check for camera, models, DPI and threshold margins
 - [ ] **Two-camera view selection** - use whichever camera currently sees the hand less
       edge-on. Not stereo depth: no calibration between the cameras, just picking the
       better view

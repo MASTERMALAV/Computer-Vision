@@ -36,7 +36,7 @@ from .control.injector import MouseInjector
 from .control.pointer import PointerConfig, PointerEngine, ScrollConfig
 from .control.system import SystemActions
 from .control.typing import TypingConfig, TypingMonitor
-from .control.screens import get_virtual_desktop
+from .control.screens import get_virtual_desktop, jump_target
 from .face.pipeline import FacePipeline
 from .gestures.fsm import GestureEngine, GestureThresholds, GestureType
 from .gestures.poses import RotationConfig
@@ -128,7 +128,7 @@ class SessionSummary:
 HELP = [
     "F9       arm / disarm cursor control",
     "Esc      HOLD to disarm (works anywhere)",
-    "F10      re-centre cursor on primary",
+    "F10      jump to the next monitor",
     "c        switch camera",
     "pinch    index=click/drag  middle=right/scroll",
     "typing   hand ignored while you type",
@@ -181,9 +181,10 @@ def _run_system_actions(
                 system.volume_step(steps)
                 recent_events.append(f"volume {steps:+d}")
             elif event.detail == "brightness":
-                level = system.brightness_step(
-                    1 if steps > 0 else -1, cfg.actions.brightness_percent
-                )
+                # The full step count, not its sign: volume sends one key tap
+                # per step, so brightness must move by the same number of
+                # increments or the two knobs feel like different instruments.
+                level = system.brightness_step(steps, cfg.actions.brightness_percent)
                 recent_events.append(
                     f"brightness {level}%" if level is not None
                     else "brightness unavailable"
@@ -402,9 +403,18 @@ def run_mouse(
                 break
 
             if center_key.pressed():
-                cx, cy = desktop.primary.center
-                pointer._cursor[:] = (cx, cy)
-                injector.move_to(cx, cy)
+                # Crossing this desktop by hand is 1.46 hand-widths even at
+                # full gain - more than one clutch cycle. Jumping is not a
+                # convenience, it is the difference between using the second
+                # monitor and not bothering.
+                if len(desktop.monitors) > 1:
+                    nx, ny, target = jump_target(desktop, *pointer.state.position)
+                    pointer.jump_to(nx, ny)
+                    recent_events.append(f"-> monitor {target.index}")
+                    log.info("jumped to monitor %d", target.index)
+                else:
+                    cx, cy = desktop.primary.center
+                    pointer.jump_to(cx, cy)
 
             # ---- perception ------------------------------------------------ #
             with metrics.timer("stage.preprocess"):

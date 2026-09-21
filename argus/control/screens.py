@@ -312,3 +312,47 @@ def get_cursor_position() -> tuple[int, int]:
     point = wintypes.POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
     return int(point.x), int(point.y)
+
+
+# --------------------------------------------------------------------------- #
+# Moving between displays
+# --------------------------------------------------------------------------- #
+def relative_position(monitor: Monitor, x: float, y: float) -> tuple[float, float]:
+    """Where a point sits inside a monitor, as fractions in 0..1."""
+    fx = (x - monitor.left) / max(monitor.width, 1)
+    fy = (y - monitor.top) / max(monitor.height, 1)
+    return min(max(fx, 0.0), 1.0), min(max(fy, 0.0), 1.0)
+
+
+def absolute_position(monitor: Monitor, fx: float, fy: float) -> tuple[float, float]:
+    """The inverse of :func:`relative_position`, kept one pixel inside the edges."""
+    x = monitor.left + fx * (monitor.width - 1)
+    y = monitor.top + fy * (monitor.height - 1)
+    return x, y
+
+
+def jump_target(
+    desktop: VirtualDesktop, x: float, y: float, step: int = 1
+) -> tuple[float, float, Monitor]:
+    """Where the cursor should land on the next display.
+
+    The *relative* position is preserved rather than centring, so the cursor
+    keeps the place it had: at the top-left of one screen it arrives at the
+    top-left of the next. Centring would discard the intent behind where the
+    pointer already was.
+
+    This matters more than it sounds on a mixed setup - these two displays
+    differ in size, in vertical offset and in DPI, so no fixed pixel offset
+    would land sensibly on both.
+    """
+    monitors = desktop.monitors
+    if len(monitors) < 2:
+        return x, y, desktop.monitor_at(x, y)
+
+    current = desktop.monitor_at(x, y)
+    index = next((i for i, m in enumerate(monitors) if m.index == current.index), 0)
+    target = monitors[(index + step) % len(monitors)]
+
+    fx, fy = relative_position(current, x, y)
+    nx, ny = absolute_position(target, fx, fy)
+    return nx, ny, target

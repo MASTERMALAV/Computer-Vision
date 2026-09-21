@@ -92,7 +92,7 @@ Tap = a click. Hold = a sustained action. That is the whole system.
 |---|---|
 | **F9** | Arm / disarm. **Nothing touches your cursor until you press this.** |
 | **Esc** (hold ~0.4 s) | Emergency stop. Works from *any* window, even if ARGUS lost focus. |
-| **F10** | Snap the cursor back to the middle of your laptop screen |
+| **F10** | Jump the cursor to your other monitor |
 | **c** | Switch to the next camera |
 | **F11** | Cycle the display: full preview -> small pill -> nothing |
 | **Ctrl+Alt+Q** | Quit (works in any mode) |
@@ -320,14 +320,28 @@ must be **recognised** if identity gating is on, and **nothing fires while you a
 
 ---
 
-## Not built yet
+## Two commands worth knowing
 
-So you are not hunting for controls that do not exist, these are **planned but not
-implemented**:
+```bash
+.\argus doctor --live
+```
 
-- **Practice mode** - target practice that measures how good the pointing actually is
-- **Jumping the cursor between monitors**
-- **`argus doctor`** - one command that checks everything is healthy
+Checks everything and tells you what to fix. Run it first whenever something feels off.
+
+```bash
+.\argus practice
+```
+
+Target practice that measures how good your pointing actually is, in bits per second, and
+suggests whether the cursor is too fast or too slow for you. Works with a normal mouse too,
+so you can compare.
+
+### Jumping between monitors
+
+Your desktop is 4480 pixels wide. Crossing it by hand takes about one and a half
+hand-widths even at full speed - more than one clutch cycle. Press **F10** to jump to the
+other monitor instead. It keeps your relative position, so from the top-left of one screen
+you arrive at the top-left of the other.
 
 ---
 

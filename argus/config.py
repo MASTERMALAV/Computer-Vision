@@ -407,7 +407,7 @@ class ArgusConfig:
     @classmethod
     def load(
         cls,
-        path: str | Path | None = None,
+        path: "str | Path | list | tuple | None" = None,
         overrides: list[str] | None = None,
         apply_profile: bool = True,
     ) -> "ArgusConfig":
@@ -419,16 +419,32 @@ class ArgusConfig:
         """
         cfg = cls()
 
-        raw: dict[str, Any] = {}
+        # Several files may be stacked: a calibration file holds only gesture
+        # thresholds and is meant to sit on top of a full configuration, not to
+        # replace one.
+        paths: list[Path] = []
         if path is not None:
-            p = Path(path)
-            if not p.is_absolute():
-                p = ROOT / p
-            if not p.exists():
-                raise ConfigError(f"Config file not found: {p}")
-            raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            if not isinstance(raw, dict):
-                raise ConfigError(f"Config root must be a mapping, got {type(raw).__name__}")
+            candidates = path if isinstance(path, (list, tuple)) else [path]
+            for candidate in candidates:
+                if candidate is None:
+                    continue
+                p = Path(candidate)
+                if not p.is_absolute():
+                    p = ROOT / p
+                if not p.exists():
+                    raise ConfigError(f"Config file not found: {p}")
+                paths.append(p)
+
+        layers: list[dict[str, Any]] = []
+        for p in paths:
+            loaded = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            if not isinstance(loaded, dict):
+                raise ConfigError(
+                    f"{p.name}: config root must be a mapping, got {type(loaded).__name__}"
+                )
+            layers.append(loaded)
+
+        raw: dict[str, Any] = _deep_merge(layers)
 
         # Resolve the requested profile first, then let explicit settings override it.
         if apply_profile:
@@ -557,6 +573,23 @@ class ArgusConfig:
 # --------------------------------------------------------------------------- #
 # Merge / override machinery
 # --------------------------------------------------------------------------- #
+def _deep_merge(layers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge config layers, with later layers winning key by key.
+
+    Merged per key rather than per section: a calibration file that sets
+    ``gestures.pinch_close`` must not wipe out every other gesture setting from
+    the layer beneath it.
+    """
+    out: dict[str, Any] = {}
+    for layer in layers:
+        for key, value in layer.items():
+            if isinstance(value, dict) and isinstance(out.get(key), dict):
+                out[key] = _deep_merge([out[key], value])
+            else:
+                out[key] = value
+    return out
+
+
 def _peek(raw: dict[str, Any], section: str, key: str) -> Any:
     """Read ``raw[section][key]`` without failing on missing/odd structure."""
     sect = raw.get(section)

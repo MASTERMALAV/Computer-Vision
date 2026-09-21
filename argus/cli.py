@@ -11,6 +11,8 @@ Every phase of the system is reachable from one entry point::
     argus enroll <name>      # enrol a face for identity gating
     argus face               # live face recognition preview
     argus actions            # volume / brightness / launch gestures
+    argus practice           # measure how good the pointing actually is
+    argus doctor             # check that everything is healthy
     argus screens            # display layout + DPI
     argus bench capture      # headless throughput benchmark
     argus config             # show the effective configuration
@@ -38,8 +40,16 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-c",
         "--config",
+        action="append",
         default=None,
-        help="YAML config file to load (default: configs/default.yaml if present)",
+        metavar="FILE",
+        help="extra YAML config layered on top of configs/default.yaml "
+             "(repeatable; later files win)",
+    )
+    parser.add_argument(
+        "--only-config",
+        action="store_true",
+        help="use only the files given with -c, ignoring configs/default.yaml",
     )
     parser.add_argument(
         "-s",
@@ -73,10 +83,16 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 def _load_config(args: argparse.Namespace) -> ArgusConfig:
     """Resolve config file + CLI conveniences into one validated config."""
-    path = args.config
-    if path is None:
-        default = ROOT / "configs" / "default.yaml"
-        path = default if default.exists() else None
+    # Layered: the shipped defaults first, then anything given with -c. A
+    # calibration file contains only gesture thresholds, so replacing the base
+    # configuration with it would quietly drop the camera choice and every
+    # other setting.
+    paths: list = []
+    default = ROOT / "configs" / "default.yaml"
+    if default.exists() and not getattr(args, "only_config", False):
+        paths.append(default)
+    paths.extend(args.config or [])
+    path = paths or None
 
     overrides = list(getattr(args, "overrides", []) or [])
     # Dedicated flags are just sugar over --set, applied first so an explicit
@@ -239,6 +255,26 @@ def cmd_face_preview(args: argparse.Namespace) -> int:
     from .face.preview import run_face_preview
 
     return run_face_preview(cfg, seconds=args.seconds)
+
+
+# --------------------------------------------------------------------------- #
+# doctor
+# --------------------------------------------------------------------------- #
+def cmd_doctor(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .doctor import run_doctor
+
+    return run_doctor(cfg, live=args.live)
+
+
+# --------------------------------------------------------------------------- #
+# practice
+# --------------------------------------------------------------------------- #
+def cmd_practice(args: argparse.Namespace) -> int:
+    cfg = _load_config(args)
+    from .practice import run_practice
+
+    return run_practice(cfg, rounds=args.rounds, out=args.out)
 
 
 # --------------------------------------------------------------------------- #
@@ -536,6 +572,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_face)
     p_face.add_argument("--seconds", type=float, default=0.0, help="auto-exit after N seconds")
     p_face.set_defaults(func=cmd_face_preview)
+
+    p_doc = sub.add_parser("doctor", help="check that everything is healthy")
+    _add_common(p_doc)
+    p_doc.add_argument("--live", action="store_true",
+                       help="also open the camera and query the display")
+    p_doc.set_defaults(func=cmd_doctor)
+
+    p_prac = sub.add_parser(
+        "practice", help="Fitts-law target practice; measures pointer throughput"
+    )
+    _add_common(p_prac)
+    p_prac.add_argument("--rounds", type=int, default=1, help="repeat the whole set N times")
+    p_prac.add_argument("--out", default=None, help="write results to this path")
+    p_prac.set_defaults(func=cmd_practice)
 
     p_act = sub.add_parser("actions", help="volume / brightness / launch gestures")
     _add_common(p_act)

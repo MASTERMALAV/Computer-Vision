@@ -333,6 +333,9 @@ class GestureState:
     mode: str = "point"
     pose: str = "unknown"
     knob_value: int = 0  # signed steps emitted this frame
+    # True as soon as the hand *looks* like an action pose, before the debounce
+    # commits. The cursor stops here; the action still waits.
+    action_pending: bool = False
 
 
 
@@ -451,6 +454,7 @@ class GestureEngine:
                 self._active_knob = ""
             self.state.dragging = False
             self.state.mode = "point"
+            self.state.action_pending = False
             self.state.pose = "unknown"
             self.poses.reset()
             self.rotation.reset()
@@ -542,13 +546,26 @@ class GestureEngine:
         if not self.t.actions_enabled:
             return events
 
-        pose = self.poses.update(classify(hand, self._pose_thresholds), now)
+        raw = classify(hand, self._pose_thresholds)
+        # Freeze early, commit late - the same shape as the click freeze. An
+        # open palm keeps the index extended, so without this the clutch would
+        # keep steering the cursor for the whole debounce window.
+        self.state.action_pending = raw in self._knobs or raw is Pose.THUMBS_UP
+
+        pose = self.poses.update(raw, now)
         self.state.pose = pose.value
         self.state.knob_value = 0
 
         # A pinch already in progress owns the hand; a pose must not hijack it.
         busy = self.left_click.dragging or self.right_click.dragging
         knob = "" if busy else self._knobs.get(pose, "")
+
+        if knob and knob != self._active_knob:
+            # Entering a knob stops the pinch detectors being updated at all,
+            # so any half-open pinch is cleared rather than left to fire a
+            # click when the pose is released.
+            self.left_click.reset()
+            self.right_click.reset()
 
         if knob != self._active_knob:
             if self._active_knob:
