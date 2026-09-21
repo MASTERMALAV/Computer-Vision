@@ -24,7 +24,14 @@ from .config import ROOT, ArgusConfig
 from .control.confirm import Confirmer
 from .control.dispatcher import ActionDispatcher
 from .control.filters import GainConfig, OneEuroConfig
-from .control.hotkeys import VK_F9, VK_F10, EdgeDetector, PanicSwitch
+from .control.hotkeys import (
+    VK_F9,
+    VK_F10,
+    VK_F11,
+    EdgeDetector,
+    PanicSwitch,
+    quit_chord,
+)
 from .control.injector import MouseInjector
 from .control.pointer import PointerConfig, PointerEngine, ScrollConfig
 from .control.screens import get_virtual_desktop
@@ -35,6 +42,7 @@ from .logsetup import get_logger
 from .metrics import Metrics
 from .ui.hands import draw_hand
 from .ui.overlay import COLORS, draw_bar, draw_panel, draw_text, fps_color
+from .ui.statuspill import PillState, StatusPill
 
 log = get_logger("app")
 
@@ -177,6 +185,8 @@ def run_mouse(
     panic = PanicSwitch()
     arm_key = EdgeDetector(VK_F9)
     center_key = EdgeDetector(VK_F10)
+    hud_key = EdgeDetector(VK_F11)
+    quit_keys = quit_chord()
 
     metrics = Metrics(window=cfg.runtime.metrics_window)
     summary = SessionSummary()
@@ -186,8 +196,40 @@ def run_mouse(
     armed_since: float | None = time.perf_counter() if start_armed else None
 
     window = cfg.ui.window_name + " - virtual mouse"
-    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window, cfg.ui.preview_width, int(cfg.ui.preview_width * 9 / 16))
+    hud_mode = cfg.ui.mode
+    pill: StatusPill | None = None
+
+    def open_hud(mode: str) -> None:
+        """Create whatever surface this mode needs, and nothing else."""
+        nonlocal pill
+        if mode == "full":
+            cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(
+                window, cfg.ui.preview_width, int(cfg.ui.preview_width * 9 / 16)
+            )
+        elif mode == "pill":
+            pill = StatusPill(
+                title=cfg.ui.window_name + " status",
+                width=cfg.ui.pill_width,
+                height=cfg.ui.pill_height,
+                corner=cfg.ui.pill_corner,
+                opacity=cfg.ui.pill_opacity,
+            )
+
+    def close_hud(mode: str) -> None:
+        nonlocal pill
+        if mode == "full":
+            try:
+                cv2.destroyWindow(window)
+                for _ in range(3):
+                    cv2.waitKey(1)
+            except Exception:  # pragma: no cover - HighGUI teardown races
+                pass
+        elif mode == "pill" and pill is not None:
+            pill.close()
+            pill = None
+
+    open_hud(hud_mode)
 
     scale_factor = (
         cfg.capture.detect_width / float(cam.actual_width)
@@ -200,7 +242,9 @@ def run_mouse(
     print("  ARGUS virtual mouse")
     print(f"  {desktop.describe()}".replace("\n", "\n  "))
     print()
+    print(f"  HUD: {hud_mode}    F11 cycles full / pill / none")
     print("  DISARMED. Press F9 to arm. Hold Esc anywhere to disarm.")
+    print("  Quit with Ctrl+Alt+Q (or q, in the full preview window).")
     print("  Point with an extended index finger to move; pinch thumb+index to click.")
     print()
 
@@ -272,6 +316,16 @@ def run_mouse(
                         pointer.sync_from_system()
                     continue
 
+            if hud_key.pressed():
+                order = ("full", "pill", "none")
+                close_hud(hud_mode)
+                hud_mode = order[(order.index(hud_mode) + 1) % len(order)]
+                open_hud(hud_mode)
+                log.info("HUD mode: %s", hud_mode)
+            if quit_keys.pressed():
+                log.info("quit requested (%s)", quit_keys.name)
+                break
+
             if center_key.pressed():
                 cx, cy = desktop.primary.center
                 pointer._cursor[:] = (cx, cy)
@@ -335,90 +389,115 @@ def run_mouse(
             if len(recent_events) > 6:
                 del recent_events[: len(recent_events) - 6]
 
-            # ---- HUD -------------------------------------------------------- #
-            with metrics.timer("stage.render"):
-                canvas = frame.image.copy()
-                if hand is not None:
-                    draw_hand(canvas, hand, show_pinch=True)
+            # The full canvas is only built when it will actually be shown.
+            # Drawing it costs roughly a third of the frame budget, so the
+            # cheaper modes skip the work rather than hiding the result.
+            gs = gestures.state
+            key = 255
+            if hud_mode == "full":
+                # ---- HUD -------------------------------------------------------- #
+                with metrics.timer("stage.render"):
+                    canvas = frame.image.copy()
+                    if hand is not None:
+                        draw_hand(canvas, hand, show_pinch=True)
 
-                armed = injector.armed
-                gs = gestures.state
-                fps = metrics.fps
+                    armed = injector.armed
+                    gs = gestures.state
+                    fps = metrics.fps
 
-                banner = "ARMED - CURSOR LIVE" if armed else "DISARMED - dry run"
-                bcolor = COLORS["error"] if armed else COLORS["ok"]
-                bw = canvas.shape[1]
-                cv2.rectangle(canvas, (0, 0), (bw, 34), bcolor, -1)
-                draw_text(canvas, banner, (14, 24), 0.7, (20, 20, 20), 2, shadow=False)
-                draw_text(
-                    canvas,
-                    f"{fps:4.1f} FPS   {metrics.mean_ms('stage.landmarks'):.0f}ms lm",
-                    (bw - 260, 24), 0.55, (20, 20, 20), 1, shadow=False,
-                )
+                    banner = "ARMED - CURSOR LIVE" if armed else "DISARMED - dry run"
+                    bcolor = COLORS["error"] if armed else COLORS["ok"]
+                    bw = canvas.shape[1]
+                    cv2.rectangle(canvas, (0, 0), (bw, 34), bcolor, -1)
+                    draw_text(canvas, banner, (14, 24), 0.7, (20, 20, 20), 2, shadow=False)
+                    draw_text(
+                        canvas,
+                        f"{fps:4.1f} FPS   {metrics.mean_ms('stage.landmarks'):.0f}ms lm",
+                        (bw - 260, 24), 0.55, (20, 20, 20), 1, shadow=False,
+                    )
 
-                lines = [
-                    f"camera    {device.name[:22]}  ({device.spec})",
-                    f"clutch    {'ENGAGED' if gs.clutch_engaged else 'released'}"
-                    f"  [{gs.mode}]"
-                    f"{'  (FROZEN)' if pstate.frozen else ''}",
-                    f"cursor    {pstate.position[0]:7.0f}, {pstate.position[1]:6.0f}"
-                    f"   monitor {pstate.monitor}",
-                    f"gain      {pstate.gain:4.2f}x   speed {gs.hand_speed:4.2f} u/s",
-                    f"pinch  i  {gs.pinch_index:5.2f}   m {gs.pinch_middle:5.2f}"
-                    f"   (close<{cfg.gestures.pinch_close})",
-                    f"drag      {'YES' if gs.dragging else 'no'}"
-                    f"   actions {dispatcher.stats.executed}"
-                    f" / blocked {summary.actions_blocked}",
-                ]
-                if gs.suppressed_by_motion:
-                    lines.append("moving too fast - gestures gated")
-                if face is not None:
-                    identity = dispatcher.identity
-                    mark = "OK" if identity.authenticated else "NO"
-                    lines.append(f"operator  [{mark}] {face.session.describe(now)}")
-                elif cfg.security.require_identity:
-                    lines.append("operator  [NO] face stage unavailable")
-                draw_panel(canvas, lines, origin=(12, 46),
-                           title="ARGUS  -  virtual mouse", min_width=390)
+                    lines = [
+                        f"camera    {device.name[:22]}  ({device.spec})",
+                        f"clutch    {'ENGAGED' if gs.clutch_engaged else 'released'}"
+                        f"  [{gs.mode}]"
+                        f"{'  (FROZEN)' if pstate.frozen else ''}",
+                        f"cursor    {pstate.position[0]:7.0f}, {pstate.position[1]:6.0f}"
+                        f"   monitor {pstate.monitor}",
+                        f"gain      {pstate.gain:4.2f}x   speed {gs.hand_speed:4.2f} u/s",
+                        f"pinch  i  {gs.pinch_index:5.2f}   m {gs.pinch_middle:5.2f}"
+                        f"   (close<{cfg.gestures.pinch_close})",
+                        f"drag      {'YES' if gs.dragging else 'no'}"
+                        f"   actions {dispatcher.stats.executed}"
+                        f" / blocked {summary.actions_blocked}",
+                    ]
+                    if gs.suppressed_by_motion:
+                        lines.append("moving too fast - gestures gated")
+                    if face is not None:
+                        identity = dispatcher.identity
+                        mark = "OK" if identity.authenticated else "NO"
+                        lines.append(f"operator  [{mark}] {face.session.describe(now)}")
+                    elif cfg.security.require_identity:
+                        lines.append("operator  [NO] face stage unavailable")
+                    draw_panel(canvas, lines, origin=(12, 46),
+                               title="ARGUS  -  virtual mouse", min_width=390)
 
-                # Pinch bar: the fastest way to see where the thresholds sit.
-                by = 46 + 22 * (len(lines) + 1) + 18
-                draw_text(canvas, "pinch", (14, by - 4), 0.42, COLORS["muted"])
-                draw_bar(canvas, (62, by - 12), 200,
-                         1.0 - min(gs.pinch_index / max(cfg.gestures.pinch_open, 1e-6), 1.0),
-                         COLORS["accent"] if gs.pinch_index > cfg.gestures.pinch_close
-                         else COLORS["ok"])
+                    # Pinch bar: the fastest way to see where the thresholds sit.
+                    by = 46 + 22 * (len(lines) + 1) + 18
+                    draw_text(canvas, "pinch", (14, by - 4), 0.42, COLORS["muted"])
+                    draw_bar(canvas, (62, by - 12), 200,
+                             1.0 - min(gs.pinch_index / max(cfg.gestures.pinch_open, 1e-6), 1.0),
+                             COLORS["accent"] if gs.pinch_index > cfg.gestures.pinch_close
+                             else COLORS["ok"])
 
-                if confirmer.is_counting:
-                    # Deliberately large and central: a countdown nobody notices
-                    # is not a safety control.
-                    ch, cw = canvas.shape[0], canvas.shape[1]
-                    pending = confirmer.pending
-                    bx, by = cw // 2 - 230, ch // 2 - 70
-                    cv2.rectangle(canvas, (bx, by), (bx + 460, by + 140),
-                                  COLORS["error"], -1)
-                    draw_text(canvas, pending.description.upper(), (bx + 24, by + 46),
-                              0.85, (250, 250, 250), 2, shadow=False)
-                    draw_text(canvas, f"in {pending.remaining(now):0.1f}s",
-                              (bx + 24, by + 88), 0.75, (250, 250, 250), 2, shadow=False)
-                    draw_text(canvas, "Esc or any gesture cancels", (bx + 24, by + 120),
-                              0.5, (245, 245, 245), 1, shadow=False)
-                    draw_bar(canvas, (bx + 24, by + 128), 412,
-                             1.0 - pending.progress(now), (250, 250, 250), height=6)
+                    if confirmer.is_counting:
+                        # Deliberately large and central: a countdown nobody notices
+                        # is not a safety control.
+                        ch, cw = canvas.shape[0], canvas.shape[1]
+                        pending = confirmer.pending
+                        bx, by = cw // 2 - 230, ch // 2 - 70
+                        cv2.rectangle(canvas, (bx, by), (bx + 460, by + 140),
+                                      COLORS["error"], -1)
+                        draw_text(canvas, pending.description.upper(), (bx + 24, by + 46),
+                                  0.85, (250, 250, 250), 2, shadow=False)
+                        draw_text(canvas, f"in {pending.remaining(now):0.1f}s",
+                                  (bx + 24, by + 88), 0.75, (250, 250, 250), 2, shadow=False)
+                        draw_text(canvas, "Esc or any gesture cancels", (bx + 24, by + 120),
+                                  0.5, (245, 245, 245), 1, shadow=False)
+                        draw_bar(canvas, (bx + 24, by + 128), 412,
+                                 1.0 - pending.progress(now), (250, 250, 250), height=6)
 
-                if recent_events:
-                    draw_panel(canvas, recent_events[-6:], origin=(canvas.shape[1] - 330, 46),
-                               scale=0.45, alpha=0.5, title="events", min_width=300)
-                if show_help:
-                    draw_panel(canvas, HELP,
-                               origin=(12, canvas.shape[0] - 24 - 22 * len(HELP)),
-                               scale=0.45, alpha=0.55, color=COLORS["muted"])
+                    if recent_events:
+                        draw_panel(canvas, recent_events[-6:], origin=(canvas.shape[1] - 330, 46),
+                                   scale=0.45, alpha=0.5, title="events", min_width=300)
+                    if show_help:
+                        draw_panel(canvas, HELP,
+                                   origin=(12, canvas.shape[0] - 24 - 22 * len(HELP)),
+                                   scale=0.45, alpha=0.55, color=COLORS["muted"])
 
-            # Timed because it is not free: the preview window is composited by
-            # the OS, and on a scaled display it is rescaled every frame.
-            with metrics.timer("stage.display"):
-                cv2.imshow(window, canvas)
-                key = cv2.waitKey(1) & 0xFF
+                # Timed because it is not free: the preview window is composited by
+                # the OS, and on a scaled display it is rescaled every frame.
+                with metrics.timer("stage.display"):
+                    cv2.imshow(window, canvas)
+                    key = cv2.waitKey(1) & 0xFF
+            elif hud_mode == "pill" and pill is not None:
+                with metrics.timer("stage.display"):
+                    pill.show(
+                        PillState(
+                            armed=injector.armed,
+                            engaged=gs.clutch_engaged,
+                            mode="drag" if gs.dragging else gs.mode,
+                            pinch=gs.pinch_index,
+                            pinch_close=cfg.gestures.pinch_close,
+                            fps=metrics.fps,
+                            frozen=pstate.frozen,
+                            identity=(
+                                dispatcher.identity.name
+                                if cfg.security.require_identity
+                                else ""
+                            ),
+                            note=recent_events[-1] if recent_events else "",
+                        )
+                    )
             if key == ord("q"):
                 break
             if key == ord("h"):
@@ -426,7 +505,7 @@ def run_mouse(
             elif key == ord("c"):
                 switch_camera = True
 
-            if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+            if hud_mode == "full" and cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
                 break
             if deadline is not None and now > deadline:
                 break
@@ -439,6 +518,8 @@ def run_mouse(
             face.close()
         engine.close()
         cam.stop()
+        if pill is not None:
+            pill.close()
         cv2.destroyAllWindows()
         for _ in range(4):
             cv2.waitKey(1)

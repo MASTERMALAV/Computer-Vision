@@ -86,8 +86,32 @@ Tap = a click. Hold = a sustained action. That is the whole system.
 | **Esc** (hold ~0.4 s) | Emergency stop. Works from *any* window, even if ARGUS lost focus. |
 | **F10** | Snap the cursor back to the middle of your laptop screen |
 | **c** | Switch to the next camera |
-| **q** | Quit |
+| **F11** | Cycle the display: full preview -> small pill -> nothing |
+| **Ctrl+Alt+Q** | Quit (works in any mode) |
+| **q** | Quit (full preview window only) |
 | **h** | Hide the help panel |
+
+### The three display modes
+
+The big camera window is a *debugging* tool. Once you trust the gestures you do not
+need it, and it is not free - it costs about a third of the per-frame budget.
+
+| Mode | What you see | Cost per frame |
+|---|---|---|
+| **full** | camera feed, hand skeleton, full HUD | 9.14 ms |
+| **pill** | a small bar in the corner: armed state, what your hand is doing, pinch meter | **0.65 ms** |
+| **none** | nothing | 0 ms |
+
+Press **F11** to cycle, or start in a mode directly:
+
+```bash
+.\argus mouse --hud pill
+```
+
+The pill is **click-through** - it can never swallow a click, which matters because the
+system is driving your cursor - and it never takes keyboard focus. Because of that, all
+its controls (F9, F11, Esc, Ctrl+Alt+Q) are read straight from the keyboard and work no
+matter which window is active.
 
 It always starts **disarmed**. The window shows exactly what it *would* do, in a dry run,
 so you can watch the pinch numbers and get a feel for it before anything is live.

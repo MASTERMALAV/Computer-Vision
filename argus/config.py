@@ -46,6 +46,10 @@ DEPRECATED_KEYS: dict[str, str] = {
         "pose, so this threshold is no longer read. Remove it, or re-run "
         "`argus calibrate --write`. See gestures.scroll_dwell_s."
     ),
+    "ui.show_window": (
+        "replaced by ui.mode, which distinguishes the full preview from the "
+        "compact status pill and from no window at all. Use ui.mode: full|pill|none."
+    ),
     "gestures.scroll_debounce_frames": (
         "the two-finger scroll pose it debounced no longer exists. Remove it, "
         "or re-run `argus calibrate --write`."
@@ -284,13 +288,36 @@ class SecurityConfig:
 # --------------------------------------------------------------------------- #
 @dataclass
 class UIConfig:
-    show_window: bool = True
+    """On-screen feedback.
+
+    ``mode`` trades information for cost. The full preview is a debugging
+    instrument: on the development machine it spends 6.85 ms of an 18.6 ms
+    frame - 37% of all compute - drawing a camera feed and pushing it to the
+    screen. Useful while learning the gestures or diagnosing tracking; pure
+    overhead once the system is trusted.
+
+        full  - the camera feed with landmarks and the full HUD
+        pill  - a small always-on-top status readout in a corner
+        none  - no window at all; the console still reports
+    """
+
+    mode: str = "full"  # full | pill | none
     window_name: str = "ARGUS"
     draw_face: bool = True
     draw_hands: bool = True
     draw_hud: bool = True
     draw_fps: bool = True
     preview_width: int = 1280
+
+    # Status pill placement and appearance.
+    pill_corner: str = "bottom-right"  # top-left | top-right | bottom-left | bottom-right
+    pill_width: int = 360
+    pill_height: int = 72
+    pill_opacity: int = 225
+
+    @property
+    def show_window(self) -> bool:
+        return self.mode != "none"
 
 
 @dataclass
@@ -384,6 +411,16 @@ class ArgusConfig:
             raise ConfigError("hands.max_hands must be >= 1")
         if self.hands.model_complexity not in (0, 1):
             raise ConfigError("hands.model_complexity must be 0 or 1")
+        if self.ui.mode not in {"full", "pill", "none"}:
+            raise ConfigError("ui.mode must be full|pill|none")
+        if self.ui.pill_corner not in {
+            "top-left", "top-right", "bottom-left", "bottom-right"
+        }:
+            raise ConfigError(
+                "ui.pill_corner must be top-left|top-right|bottom-left|bottom-right"
+            )
+        if not 40 <= self.ui.pill_opacity <= 255:
+            raise ConfigError("ui.pill_opacity must be between 40 and 255")
         if self.face.detect_every_n_frames < 1:
             raise ConfigError("face.detect_every_n_frames must be >= 1")
         g = self.gestures

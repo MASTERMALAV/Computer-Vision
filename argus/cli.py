@@ -86,6 +86,8 @@ def _load_config(args: argparse.Namespace) -> ArgusConfig:
         overrides.append(f"capture.camera.device={args.camera}")
     if getattr(args, "log_level", None):
         overrides.append(f"runtime.log_level={args.log_level}")
+    if getattr(args, "hud", None):
+        overrides.append(f"ui.mode={args.hud}")
 
     cfg = ArgusConfig.load(path, overrides)
     setup_logging(cfg.runtime.log_level)
@@ -419,6 +421,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_mouse.add_argument(
         "--armed", action="store_true",
         help="start with cursor control live (default: start disarmed)",
+    )
+    p_mouse.add_argument(
+        "--hud",
+        choices=["full", "pill", "none"],
+        default=None,
+        help="full camera preview, a small status pill, or no window at all",
     )
     p_mouse.add_argument("--out", default=None, help="write a session report to this path")
     p_mouse.set_defaults(func=cmd_mouse)

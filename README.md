@@ -93,11 +93,26 @@ do, but nothing touches your cursor until you press **F9**.
 | **F9** | arm / disarm cursor control |
 | **Esc** (hold) | emergency disarm - works from any window |
 | **F10** | re-centre the cursor on the primary display |
-| `q` | quit |
+| **F11** | cycle the display: full preview / status pill / nothing |
+| **Ctrl+Alt+Q** | quit, from any mode |
 
 If you would rather not type the `.\` each time, add the project folder to your
 `PATH`, or call the interpreter directly:
 `.venv\Scripts\python.exe -m argus mouse`.
+
+### Turn the preview off
+
+The camera window is a debugging instrument, and an expensive one: it costs **9.14 ms of
+the per-frame budget**, about a third of all compute, to draw a feed you stop needing once
+you trust the gestures. `--hud pill` replaces it with a small corner readout at **0.65 ms**
+- fourteen times cheaper - and `--hud none` removes it entirely.
+
+```bash
+.rgus mouse --hud pill
+```
+
+The pill is click-through, so it can never swallow one of the clicks the system itself is
+injecting, and it never steals focus. **F11** cycles the modes while running.
 
 ### Fit it to your hand
 

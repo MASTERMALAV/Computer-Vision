@@ -85,9 +85,18 @@ audio:
   enabled: false
 
 ui:
-  show_window: true
+  # full | pill | none
+  #   full  - the camera feed with landmarks and the full HUD. A debugging
+  #           instrument: it costs about a third of the per-frame budget.
+  #   pill  - a small always-on-top status readout in a corner. Click-through,
+  #           never takes focus. What you want for daily use.
+  #   none  - no window at all.
+  # F11 cycles between them while running.
+  mode: full
   window_name: ARGUS
   preview_width: 1280
+  pill_corner: bottom-right
+  pill_opacity: 225
 
 security:
   # Turn this on once you have enrolled:  argus enroll <your name>

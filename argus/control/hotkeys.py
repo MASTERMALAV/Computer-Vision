@@ -27,6 +27,11 @@ _KEY_NAMES = {
     VK_ESCAPE: "Esc",
     VK_F9: "F9",
     VK_F10: "F10",
+    0x77: "F8",
+    0x7A: "F11",
+    0x11: "Ctrl",
+    0x12: "Alt",
+    0x51: "Q",
 }
 
 
@@ -87,3 +92,38 @@ class PanicSwitch:
     @property
     def description(self) -> str:
         return f"hold {key_name(self.vk)} for {self.hold_s:.1f}s"
+
+
+VK_F8 = 0x77
+VK_F11 = 0x7A
+VK_MENU = 0x12  # Alt
+VK_Q = 0x51
+
+
+class Chord:
+    """Fires once when every key in a combination is held together.
+
+    Needed for controls that must work while the status pill has focus of
+    nothing - the pill is click-through and never activates, so single keys
+    like 'q' cannot reach us and would also collide with whatever application
+    the operator is actually typing into. A chord is unlikely to be pressed by
+    accident and unlikely to mean something else.
+    """
+
+    __slots__ = ("vks", "name", "_was_down")
+
+    def __init__(self, vks: tuple[int, ...], name: str = "") -> None:
+        self.vks = vks
+        self.name = name or "+".join(key_name(v) for v in vks)
+        self._was_down = False
+
+    def pressed(self) -> bool:
+        down = all(key_down(vk) for vk in self.vks)
+        fired = down and not self._was_down
+        self._was_down = down
+        return fired
+
+
+def quit_chord() -> Chord:
+    """Ctrl+Alt+Q - deliberately awkward, because it ends the session."""
+    return Chord((VK_CONTROL, VK_MENU, VK_Q), name="Ctrl+Alt+Q")
