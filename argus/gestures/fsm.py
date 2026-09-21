@@ -18,8 +18,16 @@ hand is near the camera or far from it.
 
 The clutch is a *pose*, not a pinch. Holding a pinch to keep the cursor alive
 would be both exhausting and impossible to combine with clicking, so instead:
-index extended means the cursor is live, and relaxing the hand parks it. That
-leaves pinches free to mean exactly one thing each.
+index extended means the cursor is live, and relaxing the hand parks it.
+
+That leaves the two pinches free, and each carries the same tap/hold pair:
+
+    index pinch    tap -> left click     hold + move -> drag
+    middle pinch   tap -> right click    hold + move -> scroll
+
+One rule to learn rather than four, and no extra hand shape for scrolling - an
+earlier design used two extended fingers, which required finger precision and a
+pose change at the same moment as a movement.
 """
 
 from __future__ import annotations
@@ -47,7 +55,8 @@ class GestureType(str, Enum):
     RIGHT_CLICK = "right_click"
     DRAG_START = "drag_start"
     DRAG_END = "drag_end"
-    SCROLL = "scroll"
+    SCROLL_START = "scroll_start"
+    SCROLL_END = "scroll_end"
     HAND_LOST = "hand_lost"
 
 
@@ -276,10 +285,11 @@ class GestureThresholds:
     # so gesture transitions are ignored until the hand settles.
     motion_gate_speed: float = 2.6
 
-    # Extending the middle finger alongside the index switches to scroll,
-    # matching the one-finger-move / two-finger-scroll trackpad convention.
-    scroll_middle_extended: float = 1.05
-    scroll_debounce_frames: int = 3
+    # Holding the thumb-middle pinch past this turns it into a scroll, exactly
+    # as holding the thumb-index pinch turns it into a drag. Slightly shorter
+    # than the drag dwell, because a right click is a rarer intent than a
+    # scroll and waiting to find out feels sluggish.
+    scroll_dwell_s: float = 0.30
 
 
 @dataclass
@@ -307,7 +317,6 @@ class GestureEngine:
         self.state = GestureState()
 
         self.clutch_debounce = Debouncer(self.t.clutch_debounce_frames)
-        self.scroll_debounce = Debouncer(self.t.scroll_debounce_frames)
         self.left_click = PinchDetector(
             "index",
             close_at=self.t.pinch_close,
@@ -324,10 +333,12 @@ class GestureEngine:
             open_at=self.t.pinch_open,
             approach_at=self.t.pinch_approach,
             debounce_frames=self.t.debounce_frames,
-            # A right click has no drag mode; setting the dwell out of reach
-            # keeps it a pure click.
-            drag_dwell_s=9999.0,
+            # Held rather than tapped, this becomes a scroll. The detector's
+            # "drag" machinery models it exactly - a press, a period of holding,
+            # and a release - so it is reused and the events are relabelled.
+            drag_dwell_s=self.t.scroll_dwell_s,
             cooldown_s=self.t.click_cooldown_s,
+            # No double right click; a second tap is just another right click.
             double_click_s=0.0,
         )
 
@@ -387,10 +398,14 @@ class GestureEngine:
             if self.left_click.dragging:
                 self.left_click.dragging = False
                 events.append(GestureEvent(GestureType.DRAG_END, now, detail="hand lost"))
+            if self.right_click.dragging:
+                self.right_click.dragging = False
+                events.append(GestureEvent(GestureType.SCROLL_END, now, detail="hand lost"))
             if self.state.hand_present:
                 events.append(GestureEvent(GestureType.HAND_LOST, now))
             self.state.hand_present = False
             self.state.dragging = False
+            self.state.mode = "point"
             self.clutch_debounce.reset(False)
             self.left_click.reset()
             self.right_click.reset()
@@ -419,56 +434,74 @@ class GestureEngine:
                     label,
                 )
             )
-            if not engaged and self.left_click.dragging:
-                self.left_click.dragging = False
-                events.append(
-                    GestureEvent(GestureType.DRAG_END, now, label, detail="clutch released")
-                )
-
-        # ---- mode: pointing or scrolling --------------------------------- #
-        scrolling = self.scroll_debounce.update(
-            self.state.clutch_engaged
-            and hand.finger_extension("middle") > self.t.scroll_middle_extended
-        )
-        self.state.mode = "scroll" if scrolling else "point"
+            if not engaged:
+                if self.left_click.dragging:
+                    self.left_click.dragging = False
+                    events.append(
+                        GestureEvent(GestureType.DRAG_END, now, label, detail="clutch released")
+                    )
+                if self.right_click.dragging:
+                    self.right_click.dragging = False
+                    events.append(
+                        GestureEvent(GestureType.SCROLL_END, now, label, detail="clutch released")
+                    )
 
         # ---- pinches ----------------------------------------------------- #
         # Landmarks are least trustworthy while the hand is moving fast, and a
-        # fast-moving hand is not trying to click. Gate new transitions on that,
-        # but never abandon a drag already in progress.
+        # fast-moving hand is not trying to click. Gate new gestures on that,
+        # but never abandon one already in progress.
         fast = speed > self.t.motion_gate_speed
         self.state.suppressed_by_motion = fast
+        scrolling = self.right_click.dragging
 
-        # Clicking is disabled while scrolling: the hand shape for two-finger
-        # scroll brings the thumb close to the middle finger, which would
-        # otherwise read as a right click on almost every scroll.
-        if (
-            self.state.clutch_engaged
-            and self.state.mode == "point"
-            and (not fast or self.left_click.dragging)
-        ):
-            events += self.left_click.update(self.state.pinch_index, now, label)
-            # Only consider a right click when the index pinch is clearly open,
-            # so the two cannot fire from one ambiguous hand shape.
-            if self.state.pinch_index > self.t.pinch_open:
-                # The detector is generic, so its CLICK is relabelled here -
-                # otherwise a thumb-middle pinch would dispatch a left click.
-                for ev in self.right_click.update(self.state.pinch_middle, now, label):
-                    if ev.type in (GestureType.CLICK, GestureType.DOUBLE_CLICK):
-                        ev = GestureEvent(
-                            GestureType.RIGHT_CLICK, ev.timestamp, ev.hand, ev.value, ev.detail
-                        )
-                    elif ev.type in (GestureType.DRAG_START, GestureType.DRAG_END):
-                        continue  # right button has no drag mode
-                    events.append(ev)
+        if self.state.clutch_engaged:
+            # The index pinch is ignored while scrolling. The hand is already
+            # holding a pinch and sweeping, and a stray index pinch there would
+            # click whatever the page had just scrolled under the cursor.
+            if not scrolling and (not fast or self.left_click.dragging):
+                events += self.left_click.update(self.state.pinch_index, now, label)
+
+            # The middle pinch keeps being evaluated once a scroll is running,
+            # including during fast motion - scrolling *is* fast motion, and
+            # gating it would strand the gesture with no way to end. Starting
+            # one still requires a still-ish hand and a clearly open index
+            # pinch, so the two pinches can never be confused for each other.
+            if scrolling or (
+                not fast
+                and not self.left_click.dragging
+                and self.state.pinch_index > self.t.pinch_open
+            ):
+                for event in self.right_click.update(self.state.pinch_middle, now, label):
+                    events.append(self._relabel_middle(event))
 
         self.state.dragging = self.left_click.dragging
+        self.state.mode = "scroll" if self.right_click.dragging else "point"
         return events
+
+    @staticmethod
+    def _relabel_middle(event: GestureEvent) -> GestureEvent:
+        """Give the middle-finger detector's generic events their meaning.
+
+        A tap is a right click. Held past the dwell it is a scroll, which the
+        detector models as a drag - press, hold, release - because the
+        mechanics are identical and only the effect differs.
+        """
+        mapping = {
+            GestureType.CLICK: GestureType.RIGHT_CLICK,
+            GestureType.DOUBLE_CLICK: GestureType.RIGHT_CLICK,
+            GestureType.DRAG_START: GestureType.SCROLL_START,
+            GestureType.DRAG_END: GestureType.SCROLL_END,
+        }
+        replacement = mapping.get(event.type)
+        if replacement is None:
+            return event
+        return GestureEvent(
+            replacement, event.timestamp, event.hand, event.value, event.detail
+        )
 
     def reset(self) -> None:
         self.state = GestureState()
         self.clutch_debounce.reset(False)
-        self.scroll_debounce.reset(False)
         self.left_click.reset()
         self.right_click.reset()
         self._prev_palm = None

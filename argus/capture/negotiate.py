@@ -108,8 +108,22 @@ def apply_format(cap, cfg: CameraConfig, backend: str) -> None:
         cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if cfg.autoexposure else 0.25)
 
 
-def _measure(index: int, cfg: CameraConfig, backend: str) -> CaptureProfile | None:
-    """Open one backend, apply the format, and time real frames."""
+MEASURE_ATTEMPTS = 3
+MEASURE_RETRY_DELAY_S = 0.7
+
+
+def _measure(
+    index: int, cfg: CameraConfig, backend: str, attempt: int = 0
+) -> CaptureProfile | None:
+    """Open one backend, apply the format, and time real frames.
+
+    Retries a device that opens but yields nothing. Windows commonly needs a
+    moment to finish tearing down a previous process's capture handle, and two
+    ARGUS commands run back to back hit that window routinely. Without the
+    retry a transient handle release looks identical to a dead camera - which
+    matters more now that a chosen camera is pinned to one backend and cannot
+    quietly fall back to another device.
+    """
     import cv2
 
     from .devices import backend_flag
@@ -134,6 +148,14 @@ def _measure(index: int, cfg: CameraConfig, backend: str) -> CaptureProfile | No
         elapsed = time.perf_counter() - start
 
         if good == 0 or elapsed <= 0:
+            if attempt + 1 < MEASURE_ATTEMPTS:
+                log.debug(
+                    "%s:%d delivered no frames; retrying in %.1fs",
+                    backend, index, MEASURE_RETRY_DELAY_S,
+                )
+                cap.release()
+                time.sleep(MEASURE_RETRY_DELAY_S)
+                return _measure(index, cfg, backend, attempt + 1)
             log.debug("%s: delivered no frames", backend)
             return None
 

@@ -171,8 +171,9 @@ class GestureConfig:
     click_cooldown_s: float = 0.25
     double_click_s: float = 0.40
     motion_gate_speed: float = 2.6
-    scroll_middle_extended: float = 1.05
-    scroll_debounce_frames: int = 3
+    # Hold the thumb-middle pinch this long and it becomes a scroll, exactly as
+    # holding thumb-index becomes a drag.
+    scroll_dwell_s: float = 0.30
 
 
 # --------------------------------------------------------------------------- #
@@ -190,9 +191,20 @@ class GainCurveConfig:
 @dataclass
 class ScrollSettings:
     units_per_notch: float = 0.16
-    dead_zone: float = 0.01
-    max_notches_per_frame: int = 3
+    dead_zone: float = 0.008
+    max_notches_per_frame: int = 4
     invert: bool = False
+    # Slow movement is precise; fast movement covers ground.
+    boost_start: float = 0.45
+    boost_full: float = 3.20
+    max_boost: float = 3.50
+    # A flick keeps scrolling after release and decays, like a phone. A slow,
+    # deliberate release stops dead, which is what you want when positioning.
+    momentum: bool = True
+    min_flick_speed: float = 1.10
+    momentum_tau_s: float = 0.38
+    max_coast_s: float = 1.60
+    coast_stop_speed: float = 0.30
 
 
 @dataclass
@@ -372,11 +384,8 @@ class ArgusConfig:
             raise ConfigError("control.hand must be Left|Right|any")
         if self.control.scroll.units_per_notch <= 0:
             raise ConfigError("control.scroll.units_per_notch must be positive")
-        if self.gestures.scroll_middle_extended <= self.gestures.finger_curled:
-            raise ConfigError(
-                "gestures.scroll_middle_extended must be above finger_curled, or "
-                "a curled middle finger would trigger scroll mode"
-            )
+        if self.gestures.scroll_dwell_s <= 0:
+            raise ConfigError("gestures.scroll_dwell_s must be positive")
         gc = self.control.gain
         if gc.slow_speed >= gc.fast_speed:
             raise ConfigError("control.gain.slow_speed must be < fast_speed")

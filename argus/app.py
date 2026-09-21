@@ -59,6 +59,14 @@ def _pointer_config(cfg: ArgusConfig) -> PointerConfig:
             dead_zone=c.scroll.dead_zone,
             max_notches_per_frame=c.scroll.max_notches_per_frame,
             invert=c.scroll.invert,
+            boost_start=c.scroll.boost_start,
+            boost_full=c.scroll.boost_full,
+            max_boost=c.scroll.max_boost,
+            momentum=c.scroll.momentum,
+            min_flick_speed=c.scroll.min_flick_speed,
+            momentum_tau_s=c.scroll.momentum_tau_s,
+            max_coast_s=c.scroll.max_coast_s,
+            coast_stop_speed=c.scroll.coast_stop_speed,
         ),
         source=c.source,
         dead_zone=c.dead_zone,
@@ -82,8 +90,7 @@ def _gesture_thresholds(cfg: ArgusConfig) -> GestureThresholds:
         click_cooldown_s=g.click_cooldown_s,
         double_click_s=g.double_click_s,
         motion_gate_speed=g.motion_gate_speed,
-        scroll_middle_extended=g.scroll_middle_extended,
-        scroll_debounce_frames=g.scroll_debounce_frames,
+        scroll_dwell_s=g.scroll_dwell_s,
     )
 
 
@@ -102,8 +109,7 @@ HELP = [
     "Esc      HOLD to disarm (works anywhere)",
     "F10      re-centre cursor on primary",
     "c        switch camera",
-    "point    one finger moves the cursor",
-    "scroll   two fingers scroll",
+    "pinch    index=click/drag  middle=right/scroll",
     "q        quit    h  hide this panel",
 ]
 

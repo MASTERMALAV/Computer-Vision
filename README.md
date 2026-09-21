@@ -3,10 +3,11 @@
 **A**daptive **R**ecognition & **G**esture **U**nderstanding **S**ystem - a hands-free
 cursor driven by a webcam. CPU-only, fully local, no cloud inference.
 
-Point with an extended index finger to move the cursor. Pinch thumb-to-index to click,
-thumb-to-middle to right-click, hold the pinch to drag, raise a second finger to scroll.
-Relax your hand and the cursor parks - then move it back to a comfortable spot and point
-again, exactly like lifting a mouse off a pad.
+Point with an extended index finger to move the cursor. Then one rule covers everything
+else: **tap a fingertip with your thumb for a click, hold it to do the sustained version.**
+Index tap is a left click and index hold is a drag; middle tap is a right click and middle
+hold is a scroll. Relax your hand and the cursor parks - then move it back to a comfortable
+spot and point again, exactly like lifting a mouse off a pad.
 
 Actions can be gated on your face, so the cursor only answers to you.
 
@@ -37,11 +38,18 @@ filtered away afterwards. A cursor freeze on pinch *onset* catches the remainder
 wrist-to-knuckle span, so a pinch reads the same whether your hand is 30 cm or 60 cm from
 the camera. One set of thresholds, any distance.
 
-**One finger moves, two fingers scroll.** The same convention as a trackpad, so it needs no
-learning. Both poses keep the clutch engaged, so switching between them never re-anchors
-the cursor. Clicking is suppressed while scrolling, because the two-finger pose naturally
-brings the thumb near the middle finger and would otherwise fire a right-click on almost
-every scroll.
+**Tap versus hold, on each of two fingers.** Scrolling was first built as a second hand
+pose - two fingers extended - and it was the one gesture that felt wrong. It demanded
+finger precision and a pose change at the same instant as a movement. Reusing the pinch
+instead gives one rule covering four actions, with no extra hand shape at all: tap for the
+discrete action, hold for the sustained one. Holding thumb-to-middle and sweeping is the
+same motion as grabbing a page and pulling it.
+
+**Scrolling has momentum.** Hand travel is finite - perhaps 15 cm of comfortable vertical
+range, which is a few hundred pixels of document, against a wheel that has no limit. So
+movement is boosted with speed and a flick coasts after release, decoupling distance
+scrolled from distance moved. A slow release stops dead, because that is when you are
+positioning carefully.
 
 **Gain rises with speed.** A single fixed gain cannot both hit a 16 px close button and
 cross a 4480 px dual-monitor desktop. Slow movements get precision; fast ones cover ground,

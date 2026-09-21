@@ -26,12 +26,11 @@ def test_well_separated_poses_produce_clean_thresholds():
     assert t["finger_curled"] < t["finger_extended"]
 
 
-def test_scroll_threshold_is_derived_from_the_same_measurement():
-    """A fixed scroll threshold can fall below a calibrated 'curled' value,
-    which would make a curled middle finger read as a scroll request."""
+def test_no_scroll_threshold_is_emitted():
+    """Scroll is a held middle pinch now, not a finger-extension pose, so
+    calibration must not write a threshold nothing reads."""
     t, _ = derive_thresholds(SEPARATED)
-    assert t["scroll_middle_extended"] == t["finger_extended"]
-    assert t["scroll_middle_extended"] > t["finger_curled"]
+    assert "scroll_middle_extended" not in t
 
 
 def test_derived_thresholds_sit_between_the_measured_poses():

@@ -187,6 +187,15 @@ class CameraStream:
         if self.config.backend in ("auto", "any") and not dev.backend_locked:
             candidates += [b for b in FALLBACK_BACKENDS if b != preferred]
 
+        # A pinned device cannot fall back to another backend by index, but it
+        # can fall back to the *same physical camera* reached another way. The
+        # scan records each camera's name per backend, so "Brio 100 on msmf:0"
+        # has a known twin at "Brio 100 on dshow:1". Falling back by identity
+        # keeps the right camera; falling back by index would not.
+        twins: list[tuple[str, int]] = []
+        if dev.backend_locked and dev.name:
+            twins = self._same_camera_elsewhere(dev)
+
         first_error: BaseException | None = None
         for i, backend in enumerate(candidates):
             try:
@@ -211,7 +220,52 @@ class CameraStream:
                 clear_cache()
             return cap
 
-        raise first_error or CameraError(f"Could not open camera {dev.label}.")
+        for backend, index in twins:
+            log.warning(
+                "%s is not delivering frames; trying the same camera (%s) via %s:%d",
+                dev.spec, dev.name, backend, index,
+            )
+            twin = replace(dev, backend=backend, index=index)
+            saved, self._device = self._device, twin
+            self.profile = None
+            try:
+                self.profile = negotiate(
+                    index, twin.spec, replace(self.config, backend=backend),
+                    use_cache=False,
+                )
+                cap = self._open_with(backend)
+            except (CameraError, RuntimeError) as exc:
+                log.debug("twin %s:%d also failed: %s", backend, index, exc)
+                self._device = saved
+                self.profile = None
+                continue
+            log.warning("recovered the same camera via %s:%d", backend, index)
+            return cap
+
+        raise first_error or CameraError(
+            f"Could not open camera {dev.label}."
+            "\n  - another application may be holding it"
+            "\n  - a previous run may have been killed without releasing it"
+            "\n  - pick a different camera:  argus cameras --pick"
+        )
+
+    def _same_camera_elsewhere(self, dev: CameraDevice) -> list[tuple[str, int]]:
+        """Other (backend, index) pairs the scan says are this same camera."""
+        try:
+            from .picker import load_scan
+        except Exception:  # pragma: no cover - defensive
+            return []
+        out: list[tuple[str, int]] = []
+        for cand in load_scan():
+            if not cand.works or cand.blank or not cand.name:
+                continue
+            if cand.name != dev.name:
+                continue
+            if cand.backend == dev.backend and cand.index == dev.index:
+                continue
+            out.append((cand.backend, cand.index))
+        # Fastest first: a working 5 fps path beats nothing, but only just.
+        return out
 
     def _open_with(self, backend: str, attempt: int = 0) -> Any:
         import cv2

@@ -34,7 +34,7 @@ import numpy as np
 from ..gestures.fsm import GestureEvent, GestureState, GestureType
 from ..hands.landmarks import INDEX_MCP, INDEX_TIP, Hand
 from ..logsetup import get_logger
-from .filters import GainConfig, OneEuroConfig, OneEuroFilter, PositionHistory
+from .filters import GainConfig, OneEuroConfig, OneEuroFilter, PositionHistory, smoothstep
 from .injector import MouseInjector
 
 log = get_logger("control.pointer")
@@ -42,21 +42,42 @@ log = get_logger("control.pointer")
 
 @dataclass
 class ScrollConfig:
-    """Two-finger scroll.
+    """Two-finger... no: held-middle-pinch scroll.
 
-    Scroll notches are accumulated from fractional hand movement rather than
-    emitted per frame, so a slow deliberate drag produces a steady trickle of
-    notches instead of nothing at all, and a fast flick produces several.
+    Two things make wheel scrolling from a hand feel wrong if you ignore them.
+
+    **Travel runs out.** A hand has perhaps 15 cm of comfortable vertical range,
+    which is a few hundred pixels of document. A mouse wheel has no such limit.
+    So movement is boosted with speed, and a quick flick *coasts* after release
+    the way a phone does, decoupling distance scrolled from distance moved.
+
+    **Notches are discrete.** Emitting only whole notches per frame throws away
+    the remainder, so slow movement scrolls nothing at all. The remainder is
+    accumulated across frames instead, and a slow drag produces a steady trickle.
     """
 
-    # Hand travel, in hand-scale units, for one wheel notch.
+    # Hand travel, in hand-scale units, for one wheel notch at unity boost.
     units_per_notch: float = 0.16
-    # Ignore movement below this to stop a resting hand from creeping.
-    dead_zone: float = 0.01
-    # Cap per frame, so one landmark glitch cannot scroll a document to the end.
-    max_notches_per_frame: int = 3
-    # Natural scrolling: moving the hand up scrolls the content up.
+    # Ignore movement below this, so a resting hand never creeps.
+    dead_zone: float = 0.008
+    # Cap per frame, so one landmark glitch cannot scroll to the end of a page.
+    max_notches_per_frame: int = 4
+    # Natural scrolling: move the hand up and the content follows the hand.
     invert: bool = False
+
+    # --- speed boost: slow is precise, fast covers ground ---------------- #
+    boost_start: float = 0.45  # hand-scale units/sec where boost begins
+    boost_full: float = 3.20  # ... and where it saturates
+    max_boost: float = 3.50
+
+    # --- momentum ------------------------------------------------------- #
+    momentum: bool = True
+    # Release slower than this and the scroll stops dead, which is what you
+    # want when positioning carefully. Faster, and it coasts.
+    min_flick_speed: float = 1.10
+    momentum_tau_s: float = 0.38  # exponential decay constant
+    max_coast_s: float = 1.60  # hard stop, so it can never run away
+    coast_stop_speed: float = 0.30
 
 
 class ScrollEngine:
@@ -66,35 +87,105 @@ class ScrollEngine:
         self.config = config or ScrollConfig()
         self._accumulator = 0.0
         self._prev_y: float | None = None
+        self._prev_time: float | None = None
+        self._velocity = 0.0  # smoothed, hand-scale units per second
+        self._coasting = False
+        self._coast_until = 0.0
+        self._coast_time = 0.0
 
     def reset(self) -> None:
+        """Stop immediately, cancelling any momentum."""
         self._accumulator = 0.0
         self._prev_y = None
+        self._prev_time = None
+        self._velocity = 0.0
+        self._coasting = False
 
-    def update(self, palm_y: float, hand_scale: float, active: bool) -> int:
-        """Return whole wheel notches to emit this frame."""
-        if not active or hand_scale <= 1e-6:
-            self.reset()
-            return 0
-        if self._prev_y is None:
-            self._prev_y = palm_y
-            return 0
+    @property
+    def coasting(self) -> bool:
+        return self._coasting
 
-        delta_units = (palm_y - self._prev_y) / hand_scale
-        self._prev_y = palm_y
-        if abs(delta_units) < self.config.dead_zone:
-            return 0
+    @property
+    def velocity(self) -> float:
+        return self._velocity
 
+    # ------------------------------------------------------------------ #
+    def _boost(self, speed: float) -> float:
+        cfg = self.config
+        t = smoothstep(cfg.boost_start, cfg.boost_full, abs(speed))
+        return 1.0 + (cfg.max_boost - 1.0) * t
+
+    def _emit(self, units: float) -> int:
+        """Accumulate fractional notches and release whole ones."""
+        cfg = self.config
         # Screen y grows downward; a wheel notch is positive when scrolling up.
-        direction = 1.0 if self.config.invert else -1.0
-        self._accumulator += direction * delta_units / max(self.config.units_per_notch, 1e-6)
+        direction = 1.0 if cfg.invert else -1.0
+        self._accumulator += direction * units / max(cfg.units_per_notch, 1e-6)
 
         notches = int(self._accumulator)
-        if notches:
-            self._accumulator -= notches
-            limit = self.config.max_notches_per_frame
-            notches = max(-limit, min(limit, notches))
-        return notches
+        if not notches:
+            return 0
+        self._accumulator -= notches
+        limit = cfg.max_notches_per_frame
+        return max(-limit, min(limit, notches))
+
+    def update(self, palm_y: float, hand_scale: float, active: bool, now: float) -> int:
+        """Return whole wheel notches to emit this frame.
+
+        ``active`` is true while the scroll gesture is held. When it goes false
+        the engine may keep emitting for a moment, coasting on the momentum of
+        the release.
+        """
+        cfg = self.config
+        if hand_scale <= 1e-6:
+            active = False
+
+        if active:
+            self._coasting = False
+            if self._prev_y is None or self._prev_time is None:
+                self._prev_y, self._prev_time = palm_y, now
+                return 0
+
+            dt = now - self._prev_time
+            if dt <= 1e-6 or dt > 0.25:
+                # A stall or a repeated timestamp: re-anchor rather than
+                # inventing a huge velocity from a long gap.
+                self._prev_y, self._prev_time = palm_y, now
+                return 0
+
+            delta_units = (palm_y - self._prev_y) / hand_scale
+            self._prev_y, self._prev_time = palm_y, now
+
+            instant = delta_units / dt
+            self._velocity = 0.6 * self._velocity + 0.4 * instant
+            if abs(delta_units) < cfg.dead_zone:
+                return 0
+            return self._emit(delta_units * self._boost(instant))
+
+        # ---- released ------------------------------------------------- #
+        if self._prev_y is not None:
+            self._prev_y = None
+            self._prev_time = None
+            if cfg.momentum and abs(self._velocity) >= cfg.min_flick_speed:
+                self._coasting = True
+                self._coast_until = now + cfg.max_coast_s
+                self._coast_time = now
+            else:
+                self.reset()
+
+        if not self._coasting:
+            return 0
+
+        dt = now - self._coast_time
+        self._coast_time = now
+        if dt <= 0.0 or dt > 0.25:
+            dt = 1.0 / 30.0
+
+        self._velocity *= float(np.exp(-dt / max(cfg.momentum_tau_s, 1e-6)))
+        if abs(self._velocity) < cfg.coast_stop_speed or now >= self._coast_until:
+            self.reset()
+            return 0
+        return self._emit(self._velocity * dt * self._boost(self._velocity))
 
 
 @dataclass
@@ -139,6 +230,7 @@ class PointerState:
     moved_px: float = 0.0
     monitor: int = 0
     scroll_notches: int = 0
+    coasting: bool = False
 
 
 class PointerEngine:
@@ -242,27 +334,33 @@ class PointerEngine:
         self.state.moved_px = 0.0
 
         self.state.scroll_notches = 0
+        scrolling = gesture_state.mode == "scroll"
+
+        # The scroll engine is driven every frame, not only while the gesture is
+        # held, because a flick keeps emitting for a moment after release.
+        notches = self.scroll.update(
+            float(hand.palm_center[1]) if hand is not None else 0.0,
+            hand.scale if hand is not None else 0.0,
+            active=scrolling and hand is not None,
+            now=now,
+        )
+        if notches:
+            self.injector.scroll(notches)
+            self.state.scroll_notches = notches
+        self.state.coasting = self.scroll.coasting
 
         if hand is None or not gesture_state.clutch_engaged:
             self._prev_source = None
             self._prev_time = None
-            self.scroll.reset()
             return self.state
 
-        # Scroll mode drives the wheel instead of the cursor. The pointer is
+        # Scrolling drives the wheel instead of the cursor. The pointer is
         # deliberately left where it is: scrolling a window should not also move
         # the pointer out of it.
-        if gesture_state.mode == "scroll":
-            notches = self.scroll.update(
-                float(hand.palm_center[1]), hand.scale, active=True
-            )
-            if notches:
-                self.injector.scroll(notches)
-                self.state.scroll_notches = notches
+        if scrolling:
             self._prev_source = None
             self._prev_time = None
             return self.state
-        self.scroll.reset()
 
         raw = self._source_point(hand)
         smoothed = np.asarray(self._filter(raw, now), dtype=np.float64)

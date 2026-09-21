@@ -196,12 +196,6 @@ def derive_thresholds(results: dict[str, dict]) -> tuple[dict, list[str]]:
         curled = min(extended - 0.15, curl["p95"] + 0.03)
         out["finger_extended"] = round(float(extended), 3)
         out["finger_curled"] = round(float(curled), 3)
-        # Scroll mode asks whether the *middle* finger is extended, which is the
-        # same physical question as for the index. Deriving it from the same
-        # measurement keeps the two consistent - a fixed default can otherwise
-        # end up below the calibrated "curled" threshold, which would mean a
-        # curled middle finger reads as a request to scroll.
-        out["scroll_middle_extended"] = round(float(extended), 3)
 
     return out, warnings
 

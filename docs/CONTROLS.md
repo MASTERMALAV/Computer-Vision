@@ -31,7 +31,7 @@ cursor does not slide off the thing you were aiming at.
 | **Thumb taps middle fingertip** | Right click |
 | **Thumb taps index twice quickly** | Double click |
 | **Thumb holds index** (~0.35 s) then move | Drag - release the pinch to drop |
-| **Index + middle both straight**, move hand up/down | Scroll |
+| **Thumb holds middle** (~0.30 s) then move up/down | Scroll - release to stop |
 
 ### Which fingers, exactly
 
@@ -43,18 +43,31 @@ cursor does not slide off the thing you were aiming at.
        [ your hand, palm toward the camera ]
 ```
 
-- **Thumb** - only ever used for clicking. It taps the index tip (left click) or the
-  middle tip (right click).
+- **Thumb** - the button. It touches the index tip, or the middle tip.
 - **Index** - the on/off switch. Straight = cursor live. Curled = cursor parked.
-- **Middle** - raise it alongside the index to switch into scrolling.
+- **Middle** - the thumb's second target: tap it to right-click, hold it to scroll.
 - **Ring and pinky** - not used. Do whatever is comfortable.
+
+**There is really only one rule to remember**, and it is the same for both fingers:
+
+| | quick tap | hold, then move |
+|---|---|---|
+| thumb + **index** | left click | **drag** |
+| thumb + **middle** | right click | **scroll** |
+
+Tap = a click. Hold = a sustained action. That is the whole system.
 
 ### Things worth knowing
 
 - **Moving your hand fast?** Gestures are ignored while your hand is moving quickly,
   because the tracking is least reliable then. Slow down slightly before you click.
-- **Clicking is switched off while scrolling.** The two-finger pose naturally brings your
-  thumb near your middle finger, which would otherwise fire a right click constantly.
+- **Scrolling has momentum.** A quick flick keeps scrolling and coasts to a stop, like a
+  phone. A slow, deliberate movement stops the instant you release, so you can position
+  precisely. You do not have to sweep your arm down the whole page.
+- **Clicking is switched off while you scroll**, so a stray index pinch cannot click
+  whatever the page just scrolled under the cursor.
+- **You cannot drag and scroll at once** - you only have one thumb, so letting go of one
+  grip is what frees it for the other.
 - **Move slowly for precision, quickly to cover distance.** The cursor speeds up when your
   hand does, like a normal mouse pointer.
 - **Your distance from the camera does not matter.** Every measurement is scaled by the

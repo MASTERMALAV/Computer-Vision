@@ -339,50 +339,129 @@ def test_fast_motion_gates_new_gestures():
 
 
 # --------------------------------------------------------------------------- #
-# Two-finger scroll
+# Scroll: a held middle pinch
+#
+# The index and middle pinches carry the same tap/hold pair, so these tests are
+# deliberately the mirror image of the click/drag tests above.
 # --------------------------------------------------------------------------- #
-def test_one_finger_is_point_mode():
+def engage(engine, clock):
+    """Get the clutch engaged with both pinches open."""
+    feed(engine, pointing_hand(pinch_index=0.95), 8, clock)
+    assert engine.state.clutch_engaged
+
+
+def test_quick_middle_pinch_is_a_right_click_not_a_scroll():
     e = GestureEngine()
-    feed(e, pointing_hand(pinch_index=0.95), 8)
-    assert e.state.clutch_engaged
+    c = Clock()
+    engage(e, c)
+    events = feed(e, scrolling_hand(pinch_middle=0.15), 4, c)
+    events += feed(e, pointing_hand(pinch_index=0.95), 4, c)
+    kinds = types_of(events)
+    assert GestureType.RIGHT_CLICK in kinds
+    assert GestureType.SCROLL_START not in kinds
+
+
+def test_held_middle_pinch_scrolls_and_emits_no_right_click():
+    e = GestureEngine()
+    c = Clock()
+    engage(e, c)
+    events = feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
+    assert e.state.mode == "scroll"
+    events += feed(e, pointing_hand(pinch_index=0.95), 5, c)
+    kinds = types_of(events)
+    assert GestureType.SCROLL_START in kinds
+    assert GestureType.SCROLL_END in kinds
+    assert GestureType.RIGHT_CLICK not in kinds, "a scroll must not also right click"
+    assert kinds.index(GestureType.SCROLL_START) < kinds.index(GestureType.SCROLL_END)
+
+
+def test_mode_returns_to_point_after_scrolling():
+    e = GestureEngine()
+    c = Clock()
+    engage(e, c)
+    feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
+    assert e.state.mode == "scroll"
+    feed(e, pointing_hand(pinch_index=0.95), 6, c)
     assert e.state.mode == "point"
 
 
-def test_two_fingers_is_scroll_mode():
+def test_no_left_clicks_while_scrolling():
+    """The scrolling hand is already pinching and sweeping; a stray index pinch
+    must not click whatever the page just scrolled under the cursor."""
     e = GestureEngine()
-    feed(e, scrolling_hand(pinch_index=0.95), 8)
-    assert e.state.clutch_engaged, "scrolling must keep the clutch engaged"
+    c = Clock()
+    engage(e, c)
+    feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
+    assert e.state.mode == "scroll"
+    # Index closes too, while the scroll is still held.
+    events = feed(e, make_hand(thumb="index", pinch_index=0.15, index_extension=1.3), 6, c)
+    assert GestureType.CLICK not in types_of(events)
+
+
+def test_drag_and_scroll_are_mutually_exclusive():
+    """You have one thumb, so the two grips cannot overlap.
+
+    Moving the thumb from the index to the middle fingertip necessarily opens
+    the index pinch, so the drag must end before the scroll begins - never both
+    at once, which would mean holding a mouse button down while scrolling.
+    """
+    e = GestureEngine()
+    c = Clock()
+    engage(e, c)
+    feed(e, pointing_hand(pinch_index=0.15), 20, c)
+    assert e.state.dragging
+
+    events = []
+    for _ in range(25):
+        events += e.update(scrolling_hand(pinch_middle=0.15), c.tick())
+        assert not (e.state.dragging and e.state.mode == "scroll"), (
+            "a drag and a scroll must never be active at the same time"
+        )
+
+    kinds = types_of(events)
+    assert GestureType.DRAG_END in kinds
+    assert GestureType.SCROLL_START in kinds
+    assert kinds.index(GestureType.DRAG_END) < kinds.index(GestureType.SCROLL_START)
+
+
+def test_releasing_the_clutch_ends_a_scroll():
+    e = GestureEngine()
+    c = Clock()
+    engage(e, c)
+    feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
+    assert e.state.mode == "scroll"
+    events = feed(e, make_hand(index_extension=0.4, middle_extension=0.4), 10, c)
+    assert GestureType.SCROLL_END in types_of(events)
+
+
+def test_losing_the_hand_ends_a_scroll():
+    e = GestureEngine()
+    c = Clock()
+    engage(e, c)
+    feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
+    assert e.state.mode == "scroll"
+    events = []
+    for _ in range(8):
+        events += e.update(None, c.tick())
+    assert GestureType.SCROLL_END in types_of(events)
+    assert e.state.mode == "point"
+
+
+def test_a_scroll_survives_the_fast_motion_gate():
+    """Scrolling IS fast motion. Gating it would strand the gesture with no
+    way to end, leaving the wheel engaged."""
+    t = GestureThresholds(motion_gate_speed=0.4)
+    e = GestureEngine(t)
+    c = Clock()
+    engage(e, c)
+    feed(e, scrolling_hand(pinch_middle=0.15), 20, c)
     assert e.state.mode == "scroll"
 
+    # Now sweep the hand fast, as a real scroll does.
+    for i in range(10):
+        e.update(scrolling_hand(palm=(640.0, 500.0 - i * 60.0), pinch_middle=0.15), c.tick())
+    assert e.state.suppressed_by_motion
+    assert e.state.mode == "scroll", "the gate must not cancel a running scroll"
 
-def test_switching_modes_does_not_release_the_clutch():
-    """Moving between pointing and scrolling must not re-anchor the cursor."""
-    e = GestureEngine()
-    c = Clock()
-    events = feed(e, pointing_hand(pinch_index=0.95), 8, c)
-    events += feed(e, scrolling_hand(pinch_index=0.95), 8, c)
-    events += feed(e, pointing_hand(pinch_index=0.95), 8, c)
-    assert e.state.clutch_engaged
-    assert GestureType.CLUTCH_RELEASE not in types_of(events)
-
-
-def test_no_clicks_while_scrolling():
-    """The two-finger pose brings the thumb near the middle finger; without
-    this guard almost every scroll would also fire a right click."""
-    e = GestureEngine()
-    c = Clock()
-    feed(e, scrolling_hand(pinch_index=0.95), 6, c)
-    events = feed(e, scrolling_hand(thumb="middle", pinch_middle=0.12), 6, c)
-    events += feed(e, scrolling_hand(pinch_index=0.95), 6, c)
-    kinds = types_of(events)
-    assert GestureType.CLICK not in kinds
-    assert GestureType.RIGHT_CLICK not in kinds
-
-
-def test_scroll_mode_is_debounced():
-    """A single frame of a misread middle finger must not flip into scroll."""
-    e = GestureEngine()
-    c = Clock()
-    feed(e, pointing_hand(pinch_index=0.95), 8, c)
-    e.update(scrolling_hand(pinch_index=0.95), c.tick())
-    assert e.state.mode == "point", "one frame must not switch modes"
+    events = feed(e, pointing_hand(pinch_index=0.95), 6, c)
+    assert GestureType.SCROLL_END in types_of(events)

@@ -115,9 +115,11 @@ def pointing_hand(**kw) -> Hand:
 
 
 def scrolling_hand(**kw) -> Hand:
-    """Clutch engaged, two fingers out - the scroll pose."""
+    """Clutch engaged, thumb holding the middle fingertip - the scroll grip."""
     kw.setdefault("index_extension", 1.3)
-    kw.setdefault("middle_extension", 1.3)
+    kw.setdefault("middle_extension", 0.75)
+    kw.setdefault("thumb", "middle")
+    kw.setdefault("pinch_middle", 0.15)
     return make_hand(**kw)
 
 
